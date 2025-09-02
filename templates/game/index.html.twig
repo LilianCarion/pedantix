@@ -1,0 +1,202 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Pedantix - Accueil{% endblock %}
+
+{% block body %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="game-container p-5 text-center">
+            <h1 class="display-4 mb-4">🧠 Pedantix</h1>
+            <p class="lead mb-5">Jeu de mots collaboratif basé sur Wikipedia. Créez votre propre salle ou rejoignez celle d'un ami !</p>
+
+            <!-- Onglets pour créer ou rejoindre une salle -->
+            <ul class="nav nav-pills nav-justified mb-4" id="gameTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="create-tab" data-bs-toggle="pill" data-bs-target="#create-room" type="button" role="tab">
+                        <i class="fas fa-plus-circle me-2"></i>Créer une salle
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="join-tab" data-bs-toggle="pill" data-bs-target="#join-room" type="button" role="tab">
+                        <i class="fas fa-users me-2"></i>Rejoindre une salle
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content" id="gameTabsContent">
+                <!-- Créer une salle -->
+                <div class="tab-pane fade show active" id="create-room" role="tabpanel">
+                    <form id="createRoomForm">
+                        <div class="mb-4">
+                            <label for="wikipediaUrl" class="form-label fw-bold">URL de l'article Wikipedia :</label>
+                            <input type="url" class="form-control word-input" id="wikipediaUrl"
+                                   placeholder="https://fr.wikipedia.org/wiki/..." required>
+                            <div class="form-text">Collez l'URL d'un article Wikipedia français</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-rocket me-2"></i>Créer la salle
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Rejoindre une salle -->
+                <div class="tab-pane fade" id="join-room" role="tabpanel">
+                    <form id="joinRoomForm">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="roomCode" class="form-label fw-bold">Code de la salle :</label>
+                                <input type="text" class="form-control word-input" id="roomCode"
+                                       placeholder="ABC123" maxlength="6" required style="text-transform: uppercase;">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="playerName" class="form-label fw-bold">Votre nom :</label>
+                                <input type="text" class="form-control word-input" id="playerName"
+                                       placeholder="Votre pseudo" maxlength="20" required>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-sign-in-alt me-2"></i>Rejoindre la salle
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Messages d'erreur/succès -->
+            <div id="alertContainer" class="mt-4"></div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="game-container p-4 mt-4">
+            <h3 class="text-center mb-3">Comment jouer ?</h3>
+            <div class="row">
+                <div class="col-md-4 text-center mb-3">
+                    <i class="fas fa-search fa-3x text-primary mb-3"></i>
+                    <h5>Devinez les mots</h5>
+                    <p>Trouvez les mots-clés de l'article Wikipedia choisi</p>
+                </div>
+                <div class="col-md-4 text-center mb-3">
+                    <i class="fas fa-trophy fa-3x text-warning mb-3"></i>
+                    <h5>Gagnez des points</h5>
+                    <p>Plus le mot est important dans l'article, plus vous gagnez de points</p>
+                </div>
+                <div class="col-md-4 text-center mb-3">
+                    <i class="fas fa-users fa-3x text-success mb-3"></i>
+                    <h5>Jouez ensemble</h5>
+                    <p>Partagez le code de votre salle avec vos amis pour jouer ensemble</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const createForm = document.getElementById('createRoomForm');
+    const joinForm = document.getElementById('joinRoomForm');
+    const alertContainer = document.getElementById('alertContainer');
+
+    // Transformer le code de salle en majuscules
+    document.getElementById('roomCode').addEventListener('input', function(e) {
+        e.target.value = e.target.value.toUpperCase();
+    });
+
+    // Gérer la création de salle
+    createForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(e.target);
+        const wikipediaUrl = formData.get('wikipediaUrl') || document.getElementById('wikipediaUrl').value;
+
+        if (!wikipediaUrl) {
+            showAlert('Veuillez entrer une URL Wikipedia valide.', 'danger');
+            return;
+        }
+
+        showAlert('Création de la salle en cours...', 'info');
+
+        try {
+            const response = await fetch('/create-room', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    wikipedia_url: wikipediaUrl
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showAlert(`Salle créée avec succès ! Code: <strong>${data.room_code}</strong><br>Article: ${data.title}`, 'success');
+                setTimeout(() => {
+                    window.location.href = `/game/${data.room_code}`;
+                }, 2000);
+            } else {
+                showAlert(data.error || 'Erreur lors de la création de la salle', 'danger');
+            }
+        } catch (error) {
+            showAlert('Erreur de connexion. Veuillez réessayer.', 'danger');
+        }
+    });
+
+    // Gérer la connexion à une salle
+    joinForm.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const roomCode = document.getElementById('roomCode').value;
+        const playerName = document.getElementById('playerName').value;
+
+        if (!roomCode || !playerName) {
+            showAlert('Veuillez remplir tous les champs.', 'danger');
+            return;
+        }
+
+        showAlert('Connexion à la salle...', 'info');
+
+        try {
+            const response = await fetch('/join-room', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    room_code: roomCode,
+                    player_name: playerName
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Stocker les informations de session
+                sessionStorage.setItem('gameSession', JSON.stringify({
+                    sessionId: data.session_id,
+                    roomCode: data.room.code,
+                    playerName: data.player.name
+                }));
+
+                window.location.href = `/game/${data.room.code}`;
+            } else {
+                showAlert(data.error || 'Erreur lors de la connexion à la salle', 'danger');
+            }
+        } catch (error) {
+            showAlert('Erreur de connexion. Veuillez réessayer.', 'danger');
+        }
+    });
+
+    function showAlert(message, type) {
+        alertContainer.innerHTML = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+    }
+});
+</script>
+{% endblock %}

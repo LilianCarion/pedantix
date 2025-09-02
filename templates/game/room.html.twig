@@ -1,0 +1,541 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Pedantix - Salle {{ room_code }}{% endblock %}
+
+{% block stylesheets %}
+<style>
+    .article-content {
+        background: rgba(255, 255, 255, 0.95);
+        padding: 30px;
+        border-radius: 15px;
+        line-height: 1.8;
+        font-size: 16px;
+        text-align: justify;
+        max-height: 600px;
+        overflow-y: auto;
+        border: 2px solid #e0e0e0;
+    }
+
+    .hidden-word {
+        background: #d0d0d0;
+        color: #d0d0d0;
+        border-radius: 3px;
+        padding: 1px 2px;
+        cursor: pointer;
+        user-select: none;
+        transition: all 0.3s ease;
+    }
+
+    .revealed-word {
+        background: linear-gradient(45deg, #4CAF50, #45a049);
+        color: white;
+        border-radius: 3px;
+        padding: 1px 2px;
+        font-weight: 500;
+        animation: revealWord 0.5s ease;
+    }
+
+    @keyframes revealWord {
+        from {
+            background: #d0d0d0;
+            color: #d0d0d0;
+            transform: scale(1);
+        }
+        to {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            transform: scale(1.05);
+        }
+    }
+
+    .proximity-indicator {
+        background: linear-gradient(45deg, #FF5722, #D32F2F);
+        color: white;
+        padding: 8px 15px;
+        border-radius: 20px;
+        display: inline-block;
+        margin: 5px;
+        font-weight: 500;
+        box-shadow: 0 2px 10px rgba(255, 87, 34, 0.3);
+        animation: fadeInScale 0.5s ease;
+    }
+
+    .proximity-hot { background: linear-gradient(45deg, #FFEB3B, #FFC107) !important; color: #333 !important; }
+    .proximity-warm { background: linear-gradient(45deg, #FF9800, #F57C00) !important; }
+    .proximity-cold { background: linear-gradient(45deg, #9E9E9E, #757575) !important; }
+
+    .confetti {
+        position: fixed;
+        top: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 10px;
+        height: 10px;
+        background: #f0f;
+        animation: confetti-fall linear infinite;
+        z-index: 1000;
+    }
+
+    @keyframes confetti-fall {
+        to {
+            transform: translateX(-50%) translateY(100vh) rotate(720deg);
+        }
+    }
+
+    .guess-history {
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .title-word {
+        background: linear-gradient(45deg, #FFD700, #FFA500) !important;
+        color: #333 !important;
+        font-weight: bold !important;
+        font-size: 1.1em !important;
+        padding: 2px 4px !important;
+        box-shadow: 0 0 10px rgba(255, 215, 0, 0.5) !important;
+    }
+
+    /* Styles pour le système de proximité */
+    .proximity-very-close {
+        background: linear-gradient(45deg, #FFEB3B, #FDD835) !important;
+        color: #333 !important;
+        border-radius: 3px;
+        padding: 1px 2px;
+        font-weight: 500;
+        animation: proximityPulse 1s ease-in-out infinite alternate;
+    }
+
+    .proximity-close {
+        background: linear-gradient(45deg, #FF9800, #F57C00) !important;
+        color: white !important;
+        border-radius: 3px;
+        padding: 1px 2px;
+        font-weight: 500;
+        animation: proximityGlow 2s ease-in-out infinite alternate;
+    }
+
+    .proximity-distant {
+        background: linear-gradient(45deg, #FF5722, #D32F2F) !important;
+        color: white !important;
+        border-radius: 3px;
+        padding: 1px 2px;
+        font-weight: 500;
+    }
+
+    @keyframes proximityPulse {
+        from {
+            box-shadow: 0 0 5px rgba(255, 235, 59, 0.7);
+            transform: scale(1);
+        }
+        to {
+            box-shadow: 0 0 15px rgba(255, 235, 59, 1);
+            transform: scale(1.02);
+        }
+    }
+
+    @keyframes proximityGlow {
+        from {
+            box-shadow: 0 0 3px rgba(255, 152, 0, 0.5);
+        }
+        to {
+            box-shadow: 0 0 8px rgba(255, 152, 0, 0.8);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="row">
+    <!-- Zone de jeu principale -->
+    <div class="col-lg-8">
+        <div class="game-container p-4">
+            <!-- En-tête de la salle -->
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 id="roomTitle">Chargement...</h2>
+                    <p class="text-muted mb-0">Code de salle: <strong>{{ room_code }}</strong></p>
+                </div>
+                <button class="btn btn-outline-primary" onclick="copyRoomCode()">
+                    <i class="fas fa-copy me-2"></i>Partager
+                </button>
+            </div>
+
+            <!-- Statistiques du joueur -->
+            <div class="row mb-4" id="playerStats" style="display: none;">
+                <div class="col-md-3 col-6">
+                    <div class="text-center p-3 bg-light rounded">
+                        <h4 id="playerScore" class="text-primary mb-0">0</h4>
+                        <small class="text-muted">Score</small>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="text-center p-3 bg-light rounded">
+                        <h4 id="playerAttempts" class="text-info mb-0">0</h4>
+                        <small class="text-muted">Tentatives</small>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="text-center p-3 bg-light rounded">
+                        <h4 id="foundWordsCount" class="text-success mb-0">0</h4>
+                        <small class="text-muted">Mots trouvés</small>
+                    </div>
+                </div>
+                <div class="col-md-3 col-6">
+                    <div class="text-center p-3 bg-light rounded">
+                        <h4 id="playerName" class="text-warning mb-0">-</h4>
+                        <small class="text-muted">Joueur</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Formulaire de saisie -->
+            <form id="guessForm" style="display: none;">
+                <div class="input-group input-group-lg mb-4">
+                    <input type="text" class="form-control word-input" id="wordGuess"
+                           placeholder="Entrez votre mot..." autocomplete="off">
+                    <button class="btn btn-primary" type="submit">
+                        <i class="fas fa-search me-2"></i>Deviner
+                    </button>
+                </div>
+            </form>
+
+            <!-- Zone de connexion -->
+            <div id="connectionForm">
+                <div class="text-center mb-4">
+                    <h4>Rejoindre la salle {{ room_code }}</h4>
+                </div>
+                <form id="joinRoomForm">
+                    <div class="input-group input-group-lg mb-3">
+                        <input type="text" class="form-control word-input" id="playerNameInput"
+                               placeholder="Votre nom..." maxlength="20" required>
+                        <button class="btn btn-primary" type="submit">
+                            <i class="fas fa-sign-in-alt me-2"></i>Rejoindre
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Messages de résultat -->
+            <div id="resultMessage" class="mb-4"></div>
+
+            <!-- Article Wikipedia avec mots grisés -->
+            <div id="articleSection" style="display: none;">
+                <h5 class="mb-3">Article Wikipedia :</h5>
+                <div id="articleContent" class="article-content">
+                    Chargement de l'article...
+                </div>
+            </div>
+
+            <!-- Historique des tentatives -->
+            <div id="guessHistorySection" style="display: none;">
+                <h5 class="mb-3">Vos tentatives :</h5>
+                <div id="guessHistory" class="guess-history"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar avec classement et joueurs actifs -->
+    <div class="col-lg-4">
+        <!-- Classement -->
+        <div class="game-container p-4 mb-4">
+            <h5 class="mb-3">
+                <i class="fas fa-trophy text-warning me-2"></i>Classement
+            </h5>
+            <div id="leaderboard">
+                <p class="text-muted text-center">Chargement...</p>
+            </div>
+        </div>
+
+        <!-- Joueurs actifs -->
+        <div class="game-container p-4">
+            <h5 class="mb-3">
+                <i class="fas fa-users text-success me-2"></i>Joueurs actifs
+            </h5>
+            <div id="activePlayers">
+                <p class="text-muted text-center">Chargement...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de fin de jeu -->
+<div class="modal fade" id="gameCompletedModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">
+                    <i class="fas fa-trophy me-2"></i>Félicitations !
+                </h5>
+            </div>
+            <div class="modal-body text-center">
+                <h3>🎉 Vous avez trouvé le mot-titre ! 🎉</h3>
+                <p class="lead">Score final: <span id="finalScore" class="fw-bold text-success"></span></p>
+                <p>Tentatives: <span id="finalAttempts" class="fw-bold"></span></p>
+                <div id="confettiContainer"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="location.reload()">
+                    Rejouer
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="location.href='/'">
+                    Accueil
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script>
+let gameSession = null;
+let roomCode = '{{ room_code }}';
+let guessHistory = [];
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Vérifier si on a déjà une session stockée
+    const storedSession = sessionStorage.getItem('gameSession');
+    if (storedSession) {
+        const sessionData = JSON.parse(storedSession);
+        if (sessionData.roomCode === roomCode) {
+            gameSession = sessionData;
+            showGameInterface();
+            loadGameData();
+        }
+    }
+
+    // Gérer la connexion à la salle
+    document.getElementById('joinRoomForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const playerName = document.getElementById('playerNameInput').value;
+        await joinRoom(playerName);
+    });
+
+    // Gérer les devinettes
+    document.getElementById('guessForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const guess = document.getElementById('wordGuess').value.trim();
+        if (guess) {
+            await submitGuess(guess);
+            document.getElementById('wordGuess').value = '';
+        }
+    });
+
+    // Actualiser le classement périodiquement
+    setInterval(updateLeaderboard, 10000); // Toutes les 10 secondes
+
+    // Actualiser l'article périodiquement pour voir les mots trouvés par d'autres joueurs
+    setInterval(loadArticleContent, 5000); // Toutes les 5 secondes
+});
+
+async function joinRoom(playerName) {
+    try {
+        const response = await fetch('/join-room', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                room_code: roomCode,
+                player_name: playerName
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            gameSession = {
+                sessionId: data.session_id,
+                roomCode: data.room.code,
+                playerName: data.player.name
+            };
+
+            sessionStorage.setItem('gameSession', JSON.stringify(gameSession));
+
+            // Afficher les données du jeu
+            document.getElementById('roomTitle').textContent = data.room.title;
+            updatePlayerStats(data.player);
+
+            showGameInterface();
+            loadArticleContent();
+            updateLeaderboard();
+        } else {
+            showResult(data.error, 'danger');
+        }
+    } catch (error) {
+        showResult('Erreur de connexion', 'danger');
+    }
+}
+
+async function submitGuess(guess) {
+    if (!gameSession) return;
+
+    try {
+        const response = await fetch('/api/guess', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: gameSession.sessionId,
+                guess: guess
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            const result = data.result;
+
+            // Ajouter à l'historique
+            guessHistory.unshift({
+                word: result.word,
+                found: result.found,
+                proximity: result.proximity,
+                timestamp: new Date().toLocaleTimeString()
+            });
+
+            if (result.found) {
+                if (result.gameCompleted) {
+                    // Victoire ! Révéler tout l'article
+                    showResult(`🎉 VICTOIRE ! Vous avez trouvé "${result.word}" !`, 'success');
+                    revealAllWords();
+                    showConfetti();
+                    setTimeout(() => showGameCompletedModal(data.player), 1000);
+                } else {
+                    showResult(`✅ "${result.word}" trouvé dans l'article !`, 'success');
+                    loadArticleContent(); // Recharger pour voir le mot révélé
+                }
+            } else {
+                // Afficher la proximité sémantique
+                const proximityText = getProximityText(result.proximity);
+                showResult(`❌ "${result.word}" - ${proximityText}`, 'warning');
+            }
+
+            updatePlayerStats(data.player);
+            updateGuessHistory();
+            updateLeaderboard();
+        } else {
+            showResult(data.error, 'danger');
+        }
+    } catch (error) {
+        showResult('Erreur lors de l\'envoi', 'danger');
+    }
+}
+
+async function loadArticleContent() {
+    if (!gameSession) {
+        console.log('Pas de session de jeu - impossible de charger l\'article');
+        return;
+    }
+
+    console.log('Chargement de l\'article pour la session:', gameSession.sessionId);
+
+    try {
+        // Préparer les données de proximité des dernières tentatives
+        const proximityData = guessHistory
+            .filter(guess => !guess.found && guess.proximity > 0)
+            .slice(0, 5) // Garder seulement les 5 dernières tentatives avec proximité
+            .map(guess => ({
+                word: guess.word,
+                proximity: guess.proximity
+            }));
+
+        console.log('Données de proximité:', proximityData);
+
+        const params = new URLSearchParams({
+            session_id: gameSession.sessionId,
+            proximity_data: JSON.stringify(proximityData)
+        });
+
+        console.log('URL appelée:', `/api/article-content/${roomCode}?${params}`);
+
+        const response = await fetch(`/api/article-content/${roomCode}?${params}`);
+        console.log('Réponse reçue:', response.status, response.statusText);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('Données reçues:', data);
+
+        if (data.content) {
+            document.getElementById('articleContent').innerHTML = data.content;
+            console.log('Article mis à jour avec succès');
+        } else {
+            console.error('Pas de contenu dans la réponse:', data);
+            document.getElementById('articleContent').innerHTML = '<p class="text-danger">Erreur: Aucun contenu reçu</p>';
+        }
+
+        if (data.error) {
+            console.error('Erreur du serveur:', data.error);
+            document.getElementById('articleContent').innerHTML = `<p class="text-danger">Erreur: ${data.error}</p>`;
+        }
+    } catch (error) {
+        console.error('Erreur lors du chargement de l\'article:', error);
+        document.getElementById('articleContent').innerHTML = `<p class="text-danger">Erreur de connexion: ${error.message}</p>`;
+    }
+}
+
+function getProximityText(proximity) {
+    if (proximity >= 900) return `🔥 TRÈS CHAUD ! (${proximity}/1000)`;
+    if (proximity >= 700) return `🌡️ Chaud ! (${proximity}/1000)`;
+    if (proximity >= 500) return `🌤️ Tiède (${proximity}/1000)`;
+    if (proximity >= 300) return `❄️ Froid (${proximity}/1000)`;
+    return `🧊 Très froid (${proximity}/1000)`;
+}
+
+function revealAllWords() {
+    // Révéler tous les mots de l'article
+    document.querySelectorAll('.hidden-word').forEach(word => {
+        word.classList.remove('hidden-word');
+        word.classList.add('title-word'); // Style spécial pour la victoire
+    });
+}
+
+function showConfetti() {
+    const container = document.getElementById('confettiContainer') || document.body;
+
+    // Créer des confettis
+    for (let i = 0; i < 50; i++) {
+        setTimeout(() => {
+            const confetti = document.createElement('div');
+            confetti.className = 'confetti';
+            confetti.style.left = Math.random() * 100 + '%';
+            confetti.style.background = `hsl(${Math.random() * 360}, 70%, 60%)`;
+            confetti.style.animationDuration = (Math.random() * 3 + 2) + 's';
+            confetti.style.animationDelay = Math.random() * 2 + 's';
+
+            container.appendChild(confetti);
+
+            setTimeout(() => confetti.remove(), 5000);
+        }, i * 100);
+    }
+}
+
+async function updateLeaderboard() {
+    try {
+        const response = await fetch(`/api/leaderboard/${roomCode}`);
+        const data = await response.json();
+
+        displayLeaderboard(data.leaderboard);
+        displayActivePlayers(data.active_players);
+    } catch (error) {
+        console.error('Erreur lors du chargement du classement:', error);
+    }
+}
+
+function showGameInterface() { document.getElementById('connectionForm').style.display = 'none'; document.getElementById('playerStats').style.display = 'flex'; document.getElementById('guessForm').style.display = 'block'; document.getElementById('articleSection').style.display = 'block'; document.getElementById('guessHistorySection').style.display = 'block'; }
+function updatePlayerStats(player) { document.getElementById('playerScore').textContent = player.score; document.getElementById('playerAttempts').textContent = player.attempts; document.getElementById('foundWordsCount').textContent = player.found_words.length; document.getElementById('playerName').textContent = gameSession.playerName; }
+
+function updateGuessHistory() { const container = document.getElementById('guessHistory'); container.innerHTML = guessHistory.slice(0, 10).map(guess => { let badgeClass = guess.found ? 'bg-success' : 'bg-warning'; let proximityText = guess.found ? 'Trouvé !' : getProximityText(guess.proximity); return `<div class="d-flex justify-content-between align-items-center p-2 mb-1 bg-light rounded"><span><strong>${guess.word}</strong> <small class="text-muted">(${guess.timestamp})</small></span><span class="badge ${badgeClass}">${proximityText}</span></div>`; }).join(''); }
+
+function displayLeaderboard(leaderboard) { const container = document.getElementById('leaderboard'); if (leaderboard.length === 0) { container.innerHTML = '<p class="text-muted text-center">Aucun joueur n\'a encore terminé</p>'; return; } container.innerHTML = leaderboard.map((player, index) => `<div class="leaderboard-item p-3"><div class="d-flex justify-content-between align-items-center"><div><span class="fw-bold">${index + 1}. ${player.player_name}</span><br><small class="text-muted">${player.attempts} tentatives</small></div><div class="text-end"><span class="fw-bold text-primary">${player.score}</span></div></div></div>`).join(''); }
+
+function displayActivePlayers(players) { const container = document.getElementById('activePlayers'); if (players.length === 0) { container.innerHTML = '<p class="text-muted text-center">Aucun joueur actif</p>'; return; } container.innerHTML = players.map(player => `<div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-light rounded"><div><span class="fw-bold">${player.player_name}</span><br><small class="text-muted">${player.found_words_count} mots</small></div><span class="badge bg-primary">${player.score}</span></div>`).join(''); }
+
+function showResult(message, type) { const container = document.getElementById('resultMessage'); container.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show">${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`; setTimeout(() => { const alert = container.querySelector('.alert'); if (alert) { const bsAlert = new bootstrap.Alert(alert); bsAlert.close(); } }, 5000); }
+
+function showGameCompletedModal(player) { document.getElementById('finalScore').textContent = player.score; document.getElementById('finalAttempts').textContent = player.attempts; const modal = new bootstrap.Modal(document.getElementById('gameCompletedModal')); modal.show(); }
+
+function copyRoomCode() { navigator.clipboard.writeText(roomCode).then(() => { showResult('Code de salle copié !', 'success'); }).catch(() => { const textArea = document.createElement('textarea'); textArea.value = roomCode; document.body.appendChild(textArea); textArea.select(); document.execCommand('copy'); document.body.removeChild(textArea); showResult('Code de salle copié !', 'success'); }); }
+
+async function loadGameData() { await loadArticleContent(); await updateLeaderboard(); }
+</script>
+{% endblock %}
