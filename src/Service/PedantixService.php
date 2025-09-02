@@ -173,23 +173,58 @@ class PedantixService
 
     private function getProximityClass(string $normalizedWord, array $proximityData): ?string
     {
+        $maxProximity = 0;
+        $bestGuess = null;
+
+        // Trouver la meilleure proximité pour ce mot
         foreach ($proximityData as $data) {
             if (!isset($data['word']) || !isset($data['proximity'])) continue;
 
             $guessNormalized = $this->normalizeWord($data['word']);
             $proximity = $data['proximity'];
 
-            // Calculer la similarité entre le mot de l'article et le mot deviné
-            $similarity = $this->calculateLevenshteinSimilarity($normalizedWord, $guessNormalized);
-
-            // Déterminer la classe CSS en fonction de la proximité
-            if ($similarity > 0.8 || $proximity > 800) {
-                return 'proximity-very-close'; // Jaune clair - on brûle
-            } elseif ($similarity > 0.6 || $proximity > 400) {
-                return 'proximity-close'; // Orange
-            } elseif ($similarity > 0.4 || $proximity > 100) {
-                return 'proximity-distant'; // Orange foncé
+            // Calculer la proximité sémantique directe entre le mot de l'article et le guess
+            $semanticScore = $this->calculateSemanticSimilarity($normalizedWord, $guessNormalized);
+            if ($semanticScore > $maxProximity) {
+                $maxProximity = $semanticScore;
+                $bestGuess = $data;
             }
+
+            // Calculer aussi la similarité orthographique
+            $similarity = $this->calculateLevenshteinSimilarity($normalizedWord, $guessNormalized);
+            $orthoScore = 0;
+            if ($similarity > 0.8) {
+                $orthoScore = 800 + ($similarity * 100);
+            } elseif ($similarity > 0.6) {
+                $orthoScore = 400 + ($similarity * 200);
+            } elseif ($similarity > 0.4) {
+                $orthoScore = 100 + ($similarity * 100);
+            }
+
+            if ($orthoScore > $maxProximity) {
+                $maxProximity = $orthoScore;
+                $bestGuess = $data;
+            }
+
+            // Vérifier les sous-chaînes
+            if (strlen($normalizedWord) >= 3 && strlen($guessNormalized) >= 3) {
+                if (strpos($normalizedWord, $guessNormalized) !== false || strpos($guessNormalized, $normalizedWord) !== false) {
+                    $substringScore = 600;
+                    if ($substringScore > $maxProximity) {
+                        $maxProximity = $substringScore;
+                        $bestGuess = $data;
+                    }
+                }
+            }
+        }
+
+        // Déterminer la classe CSS en fonction de la proximité maximale trouvée
+        if ($maxProximity >= 800) {
+            return 'proximity-very-close'; // Jaune clair - on brûle
+        } elseif ($maxProximity >= 400) {
+            return 'proximity-close'; // Orange
+        } elseif ($maxProximity >= 100) {
+            return 'proximity-distant'; // Orange foncé
         }
 
         return null;
@@ -350,6 +385,37 @@ class PedantixService
         return array_unique($cleanWords);
     }
 
+    private function extractAllWordsFromContent(string $content): array
+    {
+        // Extraire tous les mots du contenu en préservant la structure
+        $words = preg_split('/(\s+|[.,;:!?()"\'-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $cleanWords = [];
+
+        foreach ($words as $word) {
+            $cleanWord = trim($word);
+            if (empty($cleanWord) || preg_match('/^[.,;:!?()"\'\\-\\s]+$/', $cleanWord)) {
+                continue;
+            }
+
+            // Traitement spécial pour les mots avec apostrophes
+            if (strpos($cleanWord, "'") !== false) {
+                $parts = explode("'", $cleanWord);
+                foreach ($parts as $part) {
+                    $part = trim($part);
+                    if (!empty($part) && strlen($part) >= 2) {
+                        $cleanWords[] = $part;
+                    }
+                }
+            } else {
+                if (strlen($cleanWord) >= 2) {
+                    $cleanWords[] = $cleanWord;
+                }
+            }
+        }
+
+        return $cleanWords;
+    }
+
     private function extractTitleWords(string $title): array
     {
         // Extraire tous les mots significatifs du titre
@@ -436,31 +502,32 @@ class PedantixService
             }
         }
 
-        // Vérifier la proximité avec TOUS les mots du contenu
-        foreach ($contentWords as $word) {
-            if (strlen($word) >= 2 && !in_array($word, $this->getStopWords())) {
-                $similarity = $this->calculateLevenshteinSimilarity($normalizedGuess, $word);
+        // Nouveau système de proximité sémantique avancé
+        foreach ($allContentWords as $contentWord) {
+            $normalizedContentWord = $this->normalizeWord($contentWord);
+            if (strlen($normalizedContentWord) >= 2 && !in_array($normalizedContentWord, $this->getStopWords())) {
 
-                // Système de proximité basé sur la similarité
+                // 1. Vérifier la similarité sémantique directe
+                $semanticScore = $this->calculateSemanticSimilarity($normalizedGuess, $normalizedContentWord);
+                if ($semanticScore > 0) {
+                    $maxProximity = max($maxProximity, $semanticScore);
+                }
+
+                // 2. Vérifier la distance de Levenshtein (orthographe similaire)
+                $similarity = $this->calculateLevenshteinSimilarity($normalizedGuess, $normalizedContentWord);
                 if ($similarity > 0.8) {
-                    // Très proche - jaune clair (on brûle)
                     $maxProximity = max($maxProximity, 800 + ($similarity * 100));
                 } elseif ($similarity > 0.6) {
-                    // Assez proche - orange
                     $maxProximity = max($maxProximity, 400 + ($similarity * 200));
                 } elseif ($similarity > 0.4) {
-                    // Pas très proche - orange foncé
                     $maxProximity = max($maxProximity, 100 + ($similarity * 100));
                 }
-            }
-        }
 
-        // Vérifier aussi les mots partiels et les sous-chaînes
-        foreach ($contentWords as $word) {
-            if (strlen($word) >= 3) {
-                // Si le guess est contenu dans le mot ou vice versa
-                if (strpos($word, $normalizedGuess) !== false || strpos($normalizedGuess, $word) !== false) {
-                    $maxProximity = max($maxProximity, 600);
+                // 3. Vérifier les sous-chaînes
+                if (strlen($normalizedGuess) >= 3 && strlen($normalizedContentWord) >= 3) {
+                    if (strpos($normalizedGuess, $normalizedContentWord) !== false || strpos($normalizedContentWord, $normalizedGuess) !== false) {
+                        $maxProximity = max($maxProximity, 600);
+                    }
                 }
             }
         }
@@ -473,35 +540,97 @@ class PedantixService
         return min(999, $maxProximity);
     }
 
-    private function extractAllWordsFromContent(string $content): array
+    private function calculateSemanticSimilarity(string $word1, string $word2): int
     {
-        // Extraire tous les mots du contenu en préservant la structure
-        $words = preg_split('/(\s+|[.,;:!?()"\'-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
-        $cleanWords = [];
+        // Base de données de relations sémantiques simplifiée
+        $semanticGroups = $this->getSemanticGroups();
 
-        foreach ($words as $word) {
-            $cleanWord = trim($word);
-            if (empty($cleanWord) || preg_match('/^[.,;:!?()"\'\\-\\s]+$/', $cleanWord)) {
-                continue;
+        $group1 = null;
+        $group2 = null;
+
+        // Trouver les groupes sémantiques des mots
+        foreach ($semanticGroups as $groupName => $words) {
+            if (in_array($word1, $words)) {
+                $group1 = $groupName;
             }
-
-            // Traitement spécial pour les mots avec apostrophes
-            if (strpos($cleanWord, "'") !== false) {
-                $parts = explode("'", $cleanWord);
-                foreach ($parts as $part) {
-                    $part = trim($part);
-                    if (!empty($part) && strlen($part) >= 2) {
-                        $cleanWords[] = $part;
-                    }
-                }
-            } else {
-                if (strlen($cleanWord) >= 2) {
-                    $cleanWords[] = $cleanWord;
-                }
+            if (in_array($word2, $words)) {
+                $group2 = $groupName;
             }
         }
 
-        return $cleanWords;
+        // Si les deux mots sont dans le même groupe sémantique
+        if ($group1 && $group2 && $group1 === $group2) {
+            return 900; // Très haute proximité sémantique
+        }
+
+        // Vérifier les groupes liés
+        $relatedGroups = $this->getRelatedSemanticGroups();
+        if ($group1 && $group2 && isset($relatedGroups[$group1]) && in_array($group2, $relatedGroups[$group1])) {
+            return 700; // Proximité sémantique élevée
+        }
+
+        // Vérifier les synonymes directs
+        $synonyms = $this->getSynonyms();
+        if (isset($synonyms[$word1]) && in_array($word2, $synonyms[$word1])) {
+            return 850;
+        }
+        if (isset($synonyms[$word2]) && in_array($word1, $synonyms[$word2])) {
+            return 850;
+        }
+
+        return 0;
+    }
+
+    private function getSemanticGroups(): array
+    {
+        return [
+            'etats_matiere' => ['liquide', 'gaz', 'solide', 'plasma', 'vapeur', 'fluide'],
+            'chimie' => ['molecule', 'atome', 'element', 'compose', 'reaction', 'chimique', 'formule', 'oxygene', 'hydrogene', 'carbone', 'azote'],
+            'eau_related' => ['eau', 'aquatique', 'marin', 'maritime', 'oceanique', 'fluvial', 'hydrique', 'hydraulique', 'hydrologie'],
+            'temperature' => ['chaud', 'froid', 'chaleur', 'temperature', 'thermique', 'calorique', 'glacial', 'bouillant'],
+            'corps_humain' => ['corps', 'organisme', 'cellule', 'tissu', 'organe', 'muscle', 'sang', 'cerveau', 'coeur'],
+            'science' => ['physique', 'biologie', 'chimie', 'mathematiques', 'recherche', 'experience', 'laboratoire', 'scientifique'],
+            'geographie' => ['terre', 'planete', 'continent', 'ocean', 'mer', 'riviere', 'montagne', 'vallee', 'climat'],
+            'vie' => ['vivant', 'organisme', 'biologique', 'vital', 'existence', 'survie', 'evolutif'],
+            'couleurs' => ['rouge', 'bleu', 'vert', 'jaune', 'noir', 'blanc', 'orange', 'violet', 'rose', 'gris'],
+            'taille' => ['grand', 'petit', 'enorme', 'minuscule', 'gigantesque', 'microscopique', 'immense', 'tiny'],
+            'mouvement' => ['rapide', 'lent', 'vitesse', 'acceleration', 'deceleration', 'mobile', 'statique', 'dynamique'],
+            'qualites' => ['important', 'essentiel', 'crucial', 'vital', 'necessaire', 'indispensable', 'fondamental'],
+        ];
+    }
+
+    private function getRelatedSemanticGroups(): array
+    {
+        return [
+            'etats_matiere' => ['chimie', 'temperature', 'science'],
+            'chimie' => ['etats_matiere', 'science', 'eau_related'],
+            'eau_related' => ['chimie', 'etats_matiere', 'geographie', 'vie'],
+            'temperature' => ['etats_matiere', 'science'],
+            'corps_humain' => ['vie', 'science'],
+            'science' => ['chimie', 'corps_humain', 'temperature'],
+            'geographie' => ['eau_related', 'vie'],
+            'vie' => ['corps_humain', 'eau_related', 'geographie'],
+        ];
+    }
+
+    private function getSynonyms(): array
+    {
+        return [
+            'eau' => ['h2o', 'aqua', 'flotte'],
+            'liquide' => ['fluide', 'liquid'],
+            'gaz' => ['gazeux', 'vapeur', 'aeriforme'],
+            'solide' => ['dur', 'rigide', 'cristallin'],
+            'chaud' => ['chaude', 'brulant', 'torride'],
+            'froid' => ['froide', 'glacial', 'frigide'],
+            'grand' => ['grande', 'gros', 'grosse', 'immense', 'gigantesque'],
+            'petit' => ['petite', 'minuscule', 'infime'],
+            'important' => ['importante', 'essentiel', 'essentielle', 'crucial', 'cruciale'],
+            'necessaire' => ['indispensable', 'requis', 'obligatoire'],
+            'vivant' => ['vivante', 'anime', 'biologique'],
+            'chimique' => ['chimiques', 'moleculaire'],
+            'naturel' => ['naturelle', 'nature', 'natif'],
+            'artificiel' => ['artificielle', 'synthetique', 'fabrique'],
+        ];
     }
 
     private function calculateLevenshteinSimilarity(string $str1, string $str2): float
