@@ -154,8 +154,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         }
         $steps[2]['success'] = true;
 
-        // Étape 4: Nettoyer les anciennes dépendances et forcer la mise à jour
-        $steps[] = ['step' => 4, 'description' => 'Nettoyage et mise à jour des dépendances pour PHP 8.1'];
+        // Étape 4: Nettoyer les anciennes dépendances et corriger les configurations
+        $steps[] = ['step' => 4, 'description' => 'Nettoyage complet et correction des configurations Symfony 6.4'];
 
         // Supprimer composer.lock pour forcer la résolution avec les nouvelles versions
         if (file_exists('composer.lock')) {
@@ -167,19 +167,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
             $result = execWithEnv("rm -rf vendor", $phpPath);
         }
 
-        // Vérifier et corriger la configuration CSRF si nécessaire
+        // Supprimer le cache pour éviter les conflits
+        if (is_dir('var/cache')) {
+            $result = execWithEnv("rm -rf var/cache/*", $phpPath);
+        }
+
+        // Corriger la configuration CSRF si nécessaire
         $csrfFile = 'config/packages/csrf.yaml';
         if (file_exists($csrfFile)) {
             $csrfContent = file_get_contents($csrfFile);
-            // Corriger la configuration CSRF pour Symfony 6.4
             if (strpos($csrfContent, 'token_id') !== false || strpos($csrfContent, 'stateless_token_ids') !== false) {
                 $newCsrfContent = "framework:\n    csrf_protection:\n        enabled: true\n";
                 file_put_contents($csrfFile, $newCsrfContent);
             }
         }
 
+        // Corriger la configuration property_info
+        $propertyInfoFile = 'config/packages/property_info.yaml';
+        $propertyInfoContent = "framework:\n    property_info:\n        enabled: true\n";
+        file_put_contents($propertyInfoFile, $propertyInfoContent);
+
+        // Corriger la configuration framework
+        $frameworkFile = 'config/packages/framework.yaml';
+        $frameworkContent = "framework:\n    secret: '%env(APP_SECRET)%'\n    http_method_override: false\n    handle_all_throwables: true\n    trusted_hosts: '%env(TRUSTED_HOSTS)%'\n    trusted_proxies: '%env(TRUSTED_PROXIES)%'\n    session:\n        handler_id: null\n        cookie_secure: auto\n        cookie_samesite: lax\n        storage_factory_id: session.storage.factory.native\n    php_errors:\n        log: true\n    cache:\n        app: cache.adapter.filesystem\n        system: cache.adapter.system\n";
+        file_put_contents($frameworkFile, $frameworkContent);
+
+        // Corriger la configuration doctrine
+        $doctrineFile = 'config/packages/doctrine.yaml';
+        $doctrineContent = "doctrine:\n    dbal:\n        url: '%env(resolve:DATABASE_URL)%'\n        charset: utf8mb4\n        default_table_options:\n            charset: utf8mb4\n            collate: utf8mb4_unicode_ci\n    orm:\n        auto_generate_proxy_classes: true\n        enable_lazy_ghost_objects: true\n        naming_strategy: doctrine.orm.naming_strategy.underscore_number_aware\n        auto_mapping: true\n        mappings:\n            App:\n                is_bundle: false\n                type: attribute\n                dir: '%kernel.project_dir%/src/Entity'\n                prefix: 'App\\Entity'\n                alias: App\n";
+        file_put_contents($doctrineFile, $doctrineContent);
+
+        // Corriger la configuration security
+        $securityFile = 'config/packages/security.yaml';
+        $securityContent = "security:\n    password_hashers:\n        Symfony\\Component\\Security\\Core\\User\\PasswordAuthenticatedUserInterface: 'auto'\n    providers:\n        users_in_memory: { memory: null }\n    firewalls:\n        dev:\n            pattern: ^/(_(profiler|wdt)|css|images|js)/\n            security: false\n        main:\n            lazy: true\n            provider: users_in_memory\n    access_control: []\n";
+        file_put_contents($securityFile, $securityContent);
+
+        // Corriger la configuration twig
+        $twigFile = 'config/packages/twig.yaml';
+        $twigContent = "twig:\n    default_path: '%kernel.project_dir%/templates'\n    form_themes: ['bootstrap_5_layout.html.twig']\n";
+        file_put_contents($twigFile, $twigContent);
+
+        // Corriger la configuration validator
+        $validatorFile = 'config/packages/validator.yaml';
+        $validatorContent = "framework:\n    validation:\n        email_validation_mode: html5\n        not_compromised_password: false\n";
+        file_put_contents($validatorFile, $validatorContent);
+
+        // Corriger la configuration cache
+        $cacheFile = 'config/packages/cache.yaml';
+        $cacheContent = "framework:\n    cache:\n        app: cache.adapter.filesystem\n        system: cache.adapter.system\n";
+        file_put_contents($cacheFile, $cacheContent);
+
+        // Corriger la configuration routing
+        $routingFile = 'config/packages/routing.yaml';
+        $routingContent = "framework:\n    router:\n        utf8: true\n        strict_requirements: null\n";
+        file_put_contents($routingFile, $routingContent);
+
+        // Corriger la configuration doctrine_migrations
+        $migrationsFile = 'config/packages/doctrine_migrations.yaml';
+        $migrationsContent = "doctrine_migrations:\n    migrations_paths:\n        'DoctrineMigrations': '%kernel.project_dir%/migrations'\n    enable_profiler: false\n";
+        file_put_contents($migrationsFile, $migrationsContent);
+
         // Installer avec les nouvelles contraintes de version (Symfony 6.4)
-        $result = execWithEnv("$phpPath composer.phar update --no-dev --optimize-autoloader --no-interaction", $phpPath);
+        $result = execWithEnv("$phpPath composer.phar update --no-dev --optimize-autoloader --no-interaction --with-all-dependencies", $phpPath);
         $steps[3]['success'] = $result['success'];
         $steps[3]['output'] = $result['output'];
 
