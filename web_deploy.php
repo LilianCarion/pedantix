@@ -1,14 +1,12 @@
 <?php
-// Désactiver l'affichage des erreurs HTML et forcer JSON
+// Désactiver l'affichage des erreurs HTML pour les requêtes AJAX uniquement
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-// Headers pour forcer JSON
-header('Content-Type: application/json');
-
 // Fonction pour envoyer une réponse JSON propre
 function sendJsonResponse($data) {
+    header('Content-Type: application/json');
     echo json_encode($data);
     exit;
 }
@@ -134,7 +132,8 @@ if ($_GET['action'] ?? '' === 'deploy') {
     exit;
 }
 
-// Si ce n'est pas une requête AJAX, afficher l'interface
+// Si ce n'est pas une requête AJAX, afficher l'interface HTML
+// Le header HTML sera envoyé automatiquement par défaut
 ?><!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -345,4 +344,3 @@ if ($_GET['action'] ?? '' === 'deploy') {
     </script>
 </body>
 </html>
-
