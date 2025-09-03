@@ -1,6 +1,6 @@
 <?php
 /**
- * Script de déploiement web automatique pour OVH
+ * Script de déploiement web automatique pour OVH avec gestion des chemins PHP
  * À exécuter UNE SEULE FOIS après upload via navigateur web
  * URL: http://analantix.ovh/deploy.php
  */
@@ -14,6 +14,36 @@ $ovh_config = [
     'domain' => 'analantix.ovh',
     'app_secret' => 'a9f2c8e1b5d7h3k6m9p2q8r4t7w1x5z8y2b6c9e3f7j4n8s1v5y9a2d6g3k7m1p4'
 ];
+
+// Détecter le chemin PHP correct pour OVH
+function findPhpPath() {
+    $possiblePaths = [
+        '/usr/local/php8.1/bin/php',
+        '/usr/local/php8.2/bin/php',
+        '/usr/local/php8.3/bin/php',
+        '/usr/bin/php8.1',
+        '/usr/bin/php8.2',
+        '/usr/bin/php8.3',
+        '/opt/alt/php81/usr/bin/php',
+        '/opt/alt/php82/usr/bin/php',
+        '/opt/alt/php83/usr/bin/php',
+        'php8.1',
+        'php8.2',
+        'php8.3',
+        'php'
+    ];
+
+    foreach ($possiblePaths as $path) {
+        $output = [];
+        $returnCode = 0;
+        exec("$path --version 2>/dev/null", $output, $returnCode);
+        if ($returnCode === 0 && !empty($output)) {
+            return $path;
+        }
+    }
+
+    return 'php'; // Fallback
+}
 
 // Vérifier que nous sommes bien sur le serveur
 $isLocal = in_array($_SERVER['HTTP_HOST'], ['localhost', '127.0.0.1']) ||
@@ -31,8 +61,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
     $allSuccess = true;
 
     try {
-        // Étape 1: Créer le fichier .env automatiquement
-        $steps[] = ['step' => 1, 'description' => 'Configuration automatique .env'];
+        // Détecter le chemin PHP
+        $phpPath = findPhpPath();
+
+        // Étape 1: Vérification de l'environnement
+        $steps[] = ['step' => 1, 'description' => 'Détection de l\'environnement PHP'];
+
+        $output = [];
+        $returnCode = 0;
+        exec("$phpPath --version 2>&1", $output, $returnCode);
+
+        if ($returnCode !== 0) {
+            throw new \Exception('PHP introuvable sur le serveur. Contactez votre hébergeur OVH.');
+        }
+
+        $phpVersion = implode("\n", $output);
+        $steps[0]['success'] = true;
+        $steps[0]['output'] = "PHP détecté: $phpPath\n$phpVersion";
+
+        // Étape 2: Créer le fichier .env automatiquement
+        $steps[] = ['step' => 2, 'description' => 'Configuration automatique .env'];
 
         $envContent = "# Configuration générée automatiquement pour OVH\n";
         $envContent .= "APP_ENV=prod\n";
@@ -47,10 +95,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         if (file_put_contents('.env', $envContent) === false) {
             throw new Exception('Impossible de créer le fichier .env');
         }
-        $steps[0]['success'] = true;
+        $steps[1]['success'] = true;
 
-        // Étape 2: Installer Composer
-        $steps[] = ['step' => 2, 'description' => 'Installation de Composer'];
+        // Étape 3: Installer Composer avec le bon chemin PHP
+        $steps[] = ['step' => 3, 'description' => 'Installation de Composer avec PHP détecté'];
 
         if (!file_exists('composer.phar')) {
             $composerContent = file_get_contents('https://getcomposer.org/composer.phar');
@@ -60,54 +108,102 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
             file_put_contents('composer.phar', $composerContent);
             chmod('composer.phar', 0755);
         }
-        $steps[1]['success'] = true;
+        $steps[2]['success'] = true;
 
-        // Étape 3: Installer les dépendances
-        $steps[] = ['step' => 3, 'description' => 'Installation des dépendances PHP'];
-
-        $output = [];
-        $returnCode = 0;
-        exec('php composer.phar install --no-dev --optimize-autoloader --no-interaction 2>&1', $output, $returnCode);
-        $steps[2]['success'] = $returnCode === 0;
-        $steps[2]['output'] = implode("\n", $output);
-
-        if (!$steps[2]['success']) {
-            throw new Exception('Échec de l\'installation des dépendances');
-        }
-
-        // Étape 4: Déploiement complet
-        $steps[] = ['step' => 4, 'description' => 'Déploiement complet (cache, DB, articles)'];
+        // Étape 4: Installer les dépendances avec le bon chemin PHP
+        $steps[] = ['step' => 4, 'description' => 'Installation des dépendances PHP'];
 
         $output = [];
         $returnCode = 0;
-        exec('php bin/console app:deploy prod 2>&1', $output, $returnCode);
+        exec("$phpPath composer.phar install --no-dev --optimize-autoloader --no-interaction 2>&1", $output, $returnCode);
         $steps[3]['success'] = $returnCode === 0;
         $steps[3]['output'] = implode("\n", $output);
 
         if (!$steps[3]['success']) {
-            throw new Exception('Échec du déploiement');
+            throw new Exception('Échec de l\'installation des dépendances');
         }
 
-        // Étape 5: Configuration des permissions
-        $steps[] = ['step' => 5, 'description' => 'Configuration des permissions'];
-
-        if (is_dir('var/cache')) chmod('var/cache', 0775);
-        if (is_dir('var/log')) chmod('var/log', 0775);
-        $steps[4]['success'] = true;
-
-        // Étape 6: Test final et comptage des articles
-        $steps[] = ['step' => 6, 'description' => 'Vérification finale'];
+        // Étape 5: Créer la base de données
+        $steps[] = ['step' => 5, 'description' => 'Configuration de la base de données'];
 
         $output = [];
         $returnCode = 0;
-        exec('php bin/console debug:container --env=prod 2>&1', $output, $returnCode);
-        $steps[5]['success'] = $returnCode === 0;
+        exec("$phpPath bin/console doctrine:database:create --if-not-exists --no-interaction 2>&1", $output, $returnCode);
+        $steps[4]['success'] = $returnCode === 0;
+        $steps[4]['output'] = implode("\n", $output);
 
-        // Compter les articles
+        // Continuer même si la base existe déjà
+
+        // Étape 6: Exécuter les migrations
+        $steps[] = ['step' => 6, 'description' => 'Exécution des migrations'];
+
+        $output = [];
+        $returnCode = 0;
+        exec("$phpPath bin/console doctrine:migrations:migrate --no-interaction 2>&1", $output, $returnCode);
+        $steps[5]['success'] = $returnCode === 0;
+        $steps[5]['output'] = implode("\n", $output);
+
+        if (!$steps[5]['success']) {
+            throw new Exception('Échec des migrations');
+        }
+
+        // Étape 7: Nettoyer le cache
+        $steps[] = ['step' => 7, 'description' => 'Nettoyage du cache'];
+
+        $output = [];
+        $returnCode = 0;
+        exec("$phpPath bin/console cache:clear --env=prod --no-debug 2>&1", $output, $returnCode);
+        $steps[6]['success'] = $returnCode === 0;
+        $steps[6]['output'] = implode("\n", $output);
+
+        if (!$steps[6]['success']) {
+            throw new Exception('Échec du nettoyage du cache');
+        }
+
+        // Étape 8: Peupler avec les articles Wikipedia
+        $steps[] = ['step' => 8, 'description' => 'Peuplement des articles Wikipedia'];
+
+        $output = [];
+        $returnCode = 0;
+        exec("$phpPath bin/console app:seed-wikipedia-articles 2>&1", $output, $returnCode);
+        $steps[7]['success'] = $returnCode === 0;
+        $steps[7]['output'] = implode("\n", $output);
+
+        if (!$steps[7]['success']) {
+            // Continuer même si ça échoue, les articles peuvent être ajoutés manuellement
+            $steps[7]['warning'] = 'Articles non chargés automatiquement - ils seront ajoutés lors de la première utilisation';
+        }
+
+        // Étape 9: Configuration des permissions
+        $steps[] = ['step' => 9, 'description' => 'Configuration des permissions'];
+
+        if (is_dir('var/cache')) {
+            chmod('var/cache', 0775);
+        }
+        if (is_dir('var/log')) {
+            chmod('var/log', 0775);
+        }
+
+        $steps[8]['success'] = true;
+
+        // Étape 10: Test final
+        $steps[] = ['step' => 10, 'description' => 'Test de l\'installation'];
+
+        $output = [];
+        $returnCode = 0;
+        exec("$phpPath bin/console debug:container --env=prod 2>&1", $output, $returnCode);
+        $steps[9]['success'] = $returnCode === 0;
+        $steps[9]['output'] = implode("\n", $output);
+
+        if (!$steps[9]['success']) {
+            throw new Exception('Test final échoué');
+        }
+
+        // Compter les articles en base
         $articleCount = 0;
         try {
             $output = [];
-            exec("php bin/console doctrine:query:sql 'SELECT COUNT(*) as count FROM wikipedia_article' --quiet 2>&1", $output, $returnCode);
+            exec("$phpPath bin/console doctrine:query:sql 'SELECT COUNT(*) as count FROM wikipedia_article' --quiet 2>&1", $output, $returnCode);
             if ($returnCode === 0 && !empty($output)) {
                 foreach ($output as $line) {
                     if (preg_match('/(\d+)/', $line, $matches)) {
@@ -120,23 +216,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
             // Ignorer les erreurs de comptage
         }
 
-        if (!$steps[5]['success']) {
-            throw new Exception('Test final échoué');
-        }
-
         echo json_encode([
             'success' => true,
             'message' => 'Déploiement réussi !',
             'data' => [
                 'steps' => $steps,
                 'article_count' => $articleCount,
+                'php_path' => $phpPath,
                 'domain' => $ovh_config['domain'],
                 'next_steps' => [
                     'Votre Pedantix est maintenant opérationnel !',
                     'Configurez votre serveur web pour pointer vers public/',
                     'Supprimez ce fichier deploy.php pour la sécurité',
                     'Accédez à votre site via: http://' . $ovh_config['domain'],
-                    "Articles Wikipedia en base: $articleCount"
+                    "Articles Wikipedia en base: $articleCount",
+                    "PHP utilisé: $phpPath"
                 ]
             ]
         ], JSON_UNESCAPED_UNICODE);
@@ -145,7 +239,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         echo json_encode([
             'success' => false,
             'message' => 'Erreur lors du déploiement: ' . $e->getMessage(),
-            'data' => ['steps' => $steps]
+            'data' => ['steps' => $steps, 'php_path' => $phpPath ?? 'non détecté']
         ], JSON_UNESCAPED_UNICODE);
     }
     exit;
@@ -257,6 +351,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
                     <li><strong>Utilisateur :</strong> <?php echo $ovh_config['db_user']; ?></li>
                     <li><strong>Domaine :</strong> <?php echo $ovh_config['domain']; ?></li>
                 </ul>
+
+                <div class="alert alert-info">
+                    <h5>🔧 Détection automatique du PHP</h5>
+                    <p>Le script détectera automatiquement le bon chemin PHP sur votre serveur OVH (php8.1, php8.2, etc.)</p>
+                </div>
             </div>
 
             <p>Cliquez sur le bouton ci-dessous pour démarrer le déploiement automatique. Toute la configuration est déjà prête !</p>
@@ -297,7 +396,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
                             stepDiv.className = 'step ' + (step.success ? 'success' : 'error');
                             stepDiv.innerHTML = `
                                 <strong>Étape ${step.step}:</strong> ${step.description}
-                                ${step.output ? '<pre style="font-size: 12px; margin-top: 10px;">' + step.output.substring(0, 500) + (step.output.length > 500 ? '...' : '') + '</pre>' : ''}
+                                ${step.output ? '<pre style="font-size: 12px; margin-top: 10px; max-height: 200px; overflow-y: auto;">' + step.output.substring(0, 1000) + (step.output.length > 1000 ? '...' : '') + '</pre>' : ''}
+                                ${step.warning ? '<div style="color: orange;">⚠️ ' + step.warning + '</div>' : ''}
                             `;
                             stepsContainer.appendChild(stepDiv);
                         });
@@ -307,6 +407,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
                         <div class="alert alert-success">
                             <h3>✅ Déploiement réussi !</h3>
                             <p><strong>Articles en base :</strong> ${result.data.article_count || 0}</p>
+                            <p><strong>PHP utilisé :</strong> ${result.data.php_path || 'Détecté automatiquement'}</p>
                             <p><strong>URL :</strong> <a href="http://${result.data.domain}" target="_blank">http://${result.data.domain}</a></p>
                             <h4>Prochaines étapes :</h4>
                             <ul>
@@ -319,6 +420,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
                         <div class="alert alert-danger">
                             <h3>❌ Erreur de déploiement</h3>
                             <p>${result.message}</p>
+                            ${result.data.php_path ? '<p><strong>PHP détecté :</strong> ' + result.data.php_path + '</p>' : ''}
                         </div>
                     `;
 
@@ -328,7 +430,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
                             stepDiv.className = 'step ' + (step.success ? 'success' : 'error');
                             stepDiv.innerHTML = `
                                 <strong>Étape ${step.step}:</strong> ${step.description}
-                                ${step.output ? '<pre style="font-size: 12px;">' + step.output + '</pre>' : ''}
+                                ${step.output ? '<pre style="font-size: 12px; max-height: 200px; overflow-y: auto;">' + step.output + '</pre>' : ''}
                             `;
                             stepsContainer.appendChild(stepDiv);
                         });

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 🚀 Script de déploiement automatique Pedantix OVH
+# 🚀 Script de déploiement automatique Pedantix OVH avec détection PHP
 # Exécute ce script UNE SEULE FOIS après avoir pullé le repo
 
 echo "🚀 Déploiement automatique Pedantix sur OVH"
@@ -16,18 +16,49 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Vérifier l'environnement
-log_info "1. Vérification de l'environnement..."
-if ! command -v php &> /dev/null; then
-    log_error "PHP n'est pas disponible. Vérifiez votre configuration OVH."
+# Fonction pour détecter le bon chemin PHP sur OVH
+find_php_path() {
+    local possible_paths=(
+        "/usr/local/php8.1/bin/php"
+        "/usr/local/php8.2/bin/php"
+        "/usr/local/php8.3/bin/php"
+        "/usr/bin/php8.1"
+        "/usr/bin/php8.2"
+        "/usr/bin/php8.3"
+        "/opt/alt/php81/usr/bin/php"
+        "/opt/alt/php82/usr/bin/php"
+        "/opt/alt/php83/usr/bin/php"
+        "php8.1"
+        "php8.2"
+        "php8.3"
+        "php"
+    )
+
+    for php_path in "${possible_paths[@]}"; do
+        if command -v "$php_path" &> /dev/null; then
+            local version=$($php_path --version 2>/dev/null | head -n 1)
+            if [[ $? -eq 0 ]]; then
+                echo "$php_path"
+                return 0
+            fi
+        fi
+    done
+
+    echo "php"  # Fallback
+    return 1
+}
+
+# Détecter le chemin PHP
+log_info "1. Détection de l'environnement PHP..."
+PHP_PATH=$(find_php_path)
+PHP_VERSION=$($PHP_PATH --version 2>/dev/null | head -n 1 || echo "Version inconnue")
+
+if [[ $? -eq 0 ]]; then
+    log_info "PHP détecté: $PHP_PATH"
+    log_info "Version: $PHP_VERSION"
+else
+    log_error "Aucune version de PHP trouvée. Vérifiez votre configuration OVH."
     exit 1
-fi
-
-PHP_VERSION=$(php -v | head -n 1 | cut -d ' ' -f 2 | cut -d '.' -f 1,2)
-log_info "Version PHP: $PHP_VERSION"
-
-if [[ "$PHP_VERSION" < "8.1" ]]; then
-    log_warning "PHP 8.1+ recommandé. Version actuelle: $PHP_VERSION"
 fi
 
 # Configuration automatique .env
@@ -43,24 +74,24 @@ fi
 log_info "3. Installation de Composer..."
 if [ ! -f composer.phar ]; then
     log_info "Téléchargement de Composer..."
-    curl -sS https://getcomposer.org/installer | php
+    curl -sS https://getcomposer.org/installer | $PHP_PATH
     if [ $? -ne 0 ]; then
         log_error "Échec du téléchargement de Composer"
         exit 1
     fi
 fi
 
-# Installation des dépendances
+# Installation des dépendances avec le bon chemin PHP
 log_info "4. Installation des dépendances..."
-php composer.phar install --no-dev --optimize-autoloader --no-interaction
+$PHP_PATH composer.phar install --no-dev --optimize-autoloader --no-interaction
 if [ $? -ne 0 ]; then
     log_error "Échec de l'installation des dépendances"
     exit 1
 fi
 
-# Déploiement complet
+# Déploiement complet avec le bon chemin PHP
 log_info "5. Déploiement complet (migrations + articles Wikipedia)..."
-php bin/console app:deploy prod
+$PHP_PATH bin/console app:deploy prod
 if [ $? -ne 0 ]; then
     log_error "Échec du déploiement"
     exit 1
@@ -70,25 +101,27 @@ fi
 log_info "6. Configuration des permissions..."
 chmod -R 755 var/cache var/log 2>/dev/null || true
 
-# Test de connexion à la base
+# Test de connexion à la base avec le bon chemin PHP
 log_info "7. Test de la base de données..."
-php bin/console doctrine:schema:validate --no-interaction >/dev/null 2>&1
+$PHP_PATH bin/console doctrine:schema:validate --no-interaction >/dev/null 2>&1
 if [ $? -eq 0 ]; then
     log_info "✅ Connexion à la base de données OK"
 else
     log_warning "⚠️ Problème potentiel avec la base de données"
 fi
 
-# Compter les articles
-ARTICLE_COUNT=$(php bin/console doctrine:query:sql 'SELECT COUNT(*) as count FROM wikipedia_article' --quiet 2>/dev/null | tail -n 1 | awk '{print $1}' || echo "?")
+# Compter les articles avec le bon chemin PHP
+ARTICLE_COUNT=$($PHP_PATH bin/console doctrine:query:sql 'SELECT COUNT(*) as count FROM wikipedia_article' --quiet 2>/dev/null | tail -n 1 | awk '{print $1}' || echo "?")
 
 log_info "8. Vérification finale..."
-php bin/console debug:container --env=prod >/dev/null 2>&1
+$PHP_PATH bin/console debug:container --env=prod >/dev/null 2>&1
 if [ $? -eq 0 ]; then
     echo ""
     echo "🎉 DÉPLOIEMENT RÉUSSI !"
     echo "======================="
     echo "📊 Statistiques :"
+    echo "   - PHP utilisé : $PHP_PATH"
+    echo "   - Version PHP : $PHP_VERSION"
     echo "   - Articles Wikipedia : $ARTICLE_COUNT"
     echo "   - URL : http://analantix.ovh"
     echo "   - Base de données : analanjroot"
@@ -98,7 +131,7 @@ if [ $? -eq 0 ]; then
     echo "   - Modes Compétition et Coopération"
     echo "   - Nouvelles parties automatiques"
     echo ""
-    echo "⚠️ IMPORTANT :"
+    echo "���️ IMPORTANT :"
     echo "   - Configurez votre serveur web pour pointer vers public/"
     echo "   - Activez HTTPS si possible"
     echo "   - Supprimez ce script après le premier déploiement"
