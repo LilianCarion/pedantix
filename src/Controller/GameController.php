@@ -28,7 +28,12 @@ class GameController extends AbstractController
         $wikipediaUrl = $data['wikipedia_url'] ?? '';
 
         if (empty($wikipediaUrl)) {
-            return $this->json(['error' => 'URL Wikipedia requise'], 400);
+            return $this->json(['success' => false, 'error' => 'URL Wikipedia requise'], 400);
+        }
+
+        // Valider le format de l'URL Wikipedia
+        if (!preg_match('/^https?:\/\/(fr\.)?wikipedia\.org\/wiki\/.+/', $wikipediaUrl)) {
+            return $this->json(['success' => false, 'error' => 'Veuillez entrer une URL Wikipedia française valide (ex: https://fr.wikipedia.org/wiki/Eau)'], 400);
         }
 
         try {
@@ -40,7 +45,13 @@ class GameController extends AbstractController
                 'title' => $room->getTitle()
             ]);
         } catch (\Exception $e) {
-            return $this->json(['error' => $e->getMessage()], 500);
+            // Log l'erreur pour debugging
+            error_log('Erreur création de salle: ' . $e->getMessage() . ' pour URL: ' . $wikipediaUrl);
+
+            return $this->json([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
@@ -70,7 +81,7 @@ class GameController extends AbstractController
                 'session_id' => $gameSession->getId(),
                 'room' => [
                     'code' => $room->getCode(),
-                    'title' => $room->getTitle(),
+                    'title' => 'Article mystère', // Ne pas révéler le vrai titre
                     'hints' => $room->getHints()
                 ],
                 'player' => [
@@ -102,16 +113,26 @@ class GameController extends AbstractController
         $guess = $data['guess'] ?? '';
 
         if (!$sessionId || empty($guess)) {
-            return $this->json(['error' => 'Session et mot requis'], 400);
+            return $this->json(['success' => false, 'error' => 'Session et mot requis'], 400);
         }
 
         try {
             $gameSession = $this->pedantixService->getGameSession($sessionId);
             if (!$gameSession) {
-                return $this->json(['error' => 'Session invalide'], 400);
+                return $this->json(['success' => false, 'error' => 'Session invalide'], 400);
             }
 
             $result = $this->pedantixService->submitGuess($gameSession, $guess);
+
+            // Si c'est un doublon, retourner une erreur spécifique
+            if (isset($result['duplicate']) && $result['duplicate']) {
+                return $this->json([
+                    'success' => false,
+                    'error' => 'Mot déjà essayé',
+                    'duplicate' => true,
+                    'word' => $result['word']
+                ], 400);
+            }
 
             return $this->json([
                 'success' => true,
@@ -124,7 +145,7 @@ class GameController extends AbstractController
                 ]
             ]);
         } catch (\Exception $e) {
-            return $this->json(['error' => $e->getMessage()], 500);
+            return $this->json(['success' => false, 'error' => $e->getMessage()], 500);
         }
     }
 

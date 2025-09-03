@@ -26,9 +26,19 @@
         transition: all 0.3s ease;
     }
 
+    .hidden-word-with-proximity {
+        background: #d0d0d0;
+        border-radius: 3px;
+        padding: 1px 2px;
+        cursor: pointer;
+        user-select: none;
+        transition: all 0.3s ease;
+        /* La couleur est définie par le style inline depuis PHP */
+    }
+
     .revealed-word {
-        background: linear-gradient(45deg, #4CAF50, #45a049);
-        color: white;
+        color: #333;
+        background: transparent;
         border-radius: 3px;
         padding: 1px 2px;
         font-weight: 500;
@@ -42,8 +52,8 @@
             transform: scale(1);
         }
         to {
-            background: linear-gradient(45deg, #4CAF50, #45a049);
-            color: white;
+            background: transparent;
+            color: #333;
             transform: scale(1.05);
         }
     }
@@ -83,8 +93,72 @@
     }
 
     .guess-history {
-        max-height: 200px;
+        max-height: 400px;
         overflow-y: auto;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.95);
+    }
+
+    .guess-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        margin-bottom: 8px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        border-left: 4px solid #6c757d;
+        transition: all 0.3s ease;
+    }
+
+    .guess-item.found {
+        border-left-color: #28a745;
+        background: #d4edda;
+    }
+
+    .guess-item.proximity-high {
+        border-left-color: #ffc107;
+        background: #fff3cd;
+    }
+
+    .guess-item.proximity-medium {
+        border-left-color: #fd7e14;
+        background: #ffeaa7;
+    }
+
+    .guess-item.proximity-low {
+        border-left-color: #6c757d;
+        background: #f8f9fa;
+    }
+
+    .guess-number {
+        background: #6c757d;
+        color: white;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: bold;
+        margin-right: 10px;
+        flex-shrink: 0;
+    }
+
+    .guess-item.found .guess-number {
+        background: #28a745;
+    }
+
+    .guess-item.proximity-high .guess-number {
+        background: #ffc107;
+        color: #333;
+    }
+
+    .guess-item.proximity-medium .guess-number {
+        background: #fd7e14;
     }
 
     .title-word {
@@ -96,59 +170,32 @@
         box-shadow: 0 0 10px rgba(255, 215, 0, 0.5) !important;
     }
 
-    /* Styles pour le système de proximité */
-    .proximity-very-close {
-        background: linear-gradient(45deg, #FFEB3B, #FDD835) !important;
-        color: #333 !important;
-        border-radius: 3px;
-        padding: 1px 2px;
-        font-weight: 500;
-        animation: proximityPulse 1s ease-in-out infinite alternate;
-    }
-
-    .proximity-close {
-        background: linear-gradient(45deg, #FF9800, #F57C00) !important;
-        color: white !important;
-        border-radius: 3px;
-        padding: 1px 2px;
-        font-weight: 500;
-        animation: proximityGlow 2s ease-in-out infinite alternate;
-    }
-
-    .proximity-distant {
-        background: linear-gradient(45deg, #FF5722, #D32F2F) !important;
-        color: white !important;
-        border-radius: 3px;
-        padding: 1px 2px;
-        font-weight: 500;
-    }
-
-    @keyframes proximityPulse {
-        from {
-            box-shadow: 0 0 5px rgba(255, 235, 59, 0.7);
-            transform: scale(1);
-        }
-        to {
-            box-shadow: 0 0 15px rgba(255, 235, 59, 1);
-            transform: scale(1.02);
-        }
-    }
-
-    @keyframes proximityGlow {
-        from {
-            box-shadow: 0 0 3px rgba(255, 152, 0, 0.5);
-        }
-        to {
-            box-shadow: 0 0 8px rgba(255, 152, 0, 0.8);
-        }
+    .attempts-panel {
+        position: sticky;
+        top: 20px;
     }
 </style>
 {% endblock %}
 
 {% block body %}
 <div class="row">
+    <!-- Volet des tentatives à gauche -->
+    <div class="col-lg-3">
+        <div class="attempts-panel">
+            <div class="game-container p-3">
+                <h5 class="mb-3">
+                    <i class="fas fa-list-ol text-info me-2"></i>Vos tentatives
+                    <span id="totalAttempts" class="badge bg-info ms-2">0</span>
+                </h5>
+                <div id="guessHistory" class="guess-history">
+                    <p class="text-muted text-center">Aucune tentative pour le moment</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Zone de jeu principale -->
-    <div class="col-lg-8">
+    <div class="col-lg-6">
         <div class="game-container p-4">
             <!-- En-tête de la salle -->
             <div class="d-flex justify-content-between align-items-center mb-4">
@@ -226,17 +273,11 @@
                     Chargement de l'article...
                 </div>
             </div>
-
-            <!-- Historique des tentatives -->
-            <div id="guessHistorySection" style="display: none;">
-                <h5 class="mb-3">Vos tentatives :</h5>
-                <div id="guessHistory" class="guess-history"></div>
-            </div>
         </div>
     </div>
 
     <!-- Sidebar avec classement et joueurs actifs -->
-    <div class="col-lg-4">
+    <div class="col-lg-3">
         <!-- Classement -->
         <div class="game-container p-4 mb-4">
             <h5 class="mb-3">
@@ -292,6 +333,8 @@
 let gameSession = null;
 let roomCode = '{{ room_code }}';
 let guessHistory = [];
+let uniqueWords = new Set(); // Pour éviter les doublons
+let attemptCounter = 0; // Compteur unique des tentatives
 
 document.addEventListener('DOMContentLoaded', function() {
     // Vérifier si on a déjà une session stockée
@@ -315,8 +358,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Gérer les devinettes
     document.getElementById('guessForm').addEventListener('submit', async function(e) {
         e.preventDefault();
-        const guess = document.getElementById('wordGuess').value.trim();
+        const guess = document.getElementById('wordGuess').value.trim().toLowerCase();
         if (guess) {
+            // Vérifier si le mot a déjà été essayé
+            if (uniqueWords.has(guess)) {
+                showResult(`Le mot "${guess}" a déjà été essayé !`, 'warning');
+                document.getElementById('wordGuess').value = '';
+                return;
+            }
+
             await submitGuess(guess);
             document.getElementById('wordGuess').value = '';
         }
@@ -354,6 +404,25 @@ async function joinRoom(playerName) {
             document.getElementById('roomTitle').textContent = data.room.title;
             updatePlayerStats(data.player);
 
+            // Récupérer les tentatives existantes du joueur
+            if (data.player.found_words && data.player.found_words.length > 0) {
+                data.player.found_words.forEach(word => {
+                    const normalizedWord = word.toLowerCase();
+                    if (!uniqueWords.has(normalizedWord)) {
+                        uniqueWords.add(normalizedWord);
+                        attemptCounter++;
+                        guessHistory.unshift({
+                            number: attemptCounter,
+                            word: word,
+                            found: true,
+                            proximity: null,
+                            timestamp: 'Précédent'
+                        });
+                    }
+                });
+                updateGuessHistory();
+            }
+
             showGameInterface();
             loadArticleContent();
             updateLeaderboard();
@@ -381,40 +450,58 @@ async function submitGuess(guess) {
         const data = await response.json();
         if (data.success) {
             const result = data.result;
+            const normalizedGuess = guess.toLowerCase();
 
-            // Ajouter à l'historique
-            guessHistory.unshift({
-                word: result.word,
-                found: result.found,
-                proximity: result.proximity,
-                timestamp: new Date().toLocaleTimeString()
-            });
-
-            if (result.found) {
-                if (result.gameCompleted) {
-                    // Victoire ! Révéler tout l'article
-                    showResult(`🎉 VICTOIRE ! Vous avez trouvé "${result.word}" !`, 'success');
-                    revealAllWords();
-                    showConfetti();
-                    setTimeout(() => showGameCompletedModal(data.player), 1000);
-                } else {
-                    showResult(`✅ "${result.word}" trouvé dans l'article !`, 'success');
-                    loadArticleContent(); // Recharger pour voir le mot révélé
-                }
-            } else {
-                // Afficher la proximité sémantique
-                const proximityText = getProximityText(result.proximity);
-                showResult(`❌ "${result.word}" - ${proximityText}`, 'warning');
+            // Si c'est un doublon détecté par le serveur, ne pas traiter
+            if (result.duplicate) {
+                showResult(`Le mot "${result.word}" a déjà été essayé !`, 'warning');
+                return;
             }
 
-            updatePlayerStats(data.player);
-            updateGuessHistory();
-            updateLeaderboard();
+            // Ajouter le mot à l'ensemble des mots uniques et à l'historique seulement si nouveau
+            if (!uniqueWords.has(normalizedGuess)) {
+                uniqueWords.add(normalizedGuess);
+                attemptCounter++;
+
+                guessHistory.unshift({
+                    number: attemptCounter,
+                    word: result.word,
+                    found: result.found,
+                    proximity: result.proximity,
+                    timestamp: new Date().toLocaleTimeString()
+                });
+
+                if (result.found) {
+                    if (result.gameCompleted) {
+                        // Victoire ! Révéler tout l'article
+                        showResult(`🎉 VICTOIRE ! Vous avez trouvé "${result.word}" !`, 'success');
+                        revealAllWords();
+                        showConfetti();
+                        setTimeout(() => showGameCompletedModal(data.player), 1000);
+                    } else {
+                        showResult(`✅ "${result.word}" trouvé dans l'article !`, 'success');
+                        loadArticleContent(); // Recharger pour voir le mot révélé
+                    }
+                } else {
+                    // Ne plus afficher de message de proximité - juste recharger l'article
+                    loadArticleContent(); // Recharger pour voir les suggestions colorées
+                }
+
+                updatePlayerStats(data.player);
+                updateGuessHistory();
+                updateLeaderboard();
+            }
         } else {
-            showResult(data.error, 'danger');
+            // Gérer les erreurs du serveur
+            if (data.error && data.error.includes('déjà')) {
+                showResult(`Le mot "${guess}" a déjà été essayé !`, 'warning');
+            } else {
+                showResult(data.error || 'Erreur lors de la soumission', 'danger');
+            }
         }
     } catch (error) {
-        showResult('Erreur lors de l\'envoi', 'danger');
+        console.error('Erreur réseau:', error);
+        showResult('Erreur de connexion. Veuillez réessayer.', 'danger');
     }
 }
 
@@ -481,6 +568,12 @@ function getProximityText(proximity) {
     return `🧊 Très froid (${proximity}/1000)`;
 }
 
+function getProximityClass(proximity) {
+    if (proximity >= 700) return 'proximity-high';
+    if (proximity >= 400) return 'proximity-medium';
+    return 'proximity-low';
+}
+
 function revealAllWords() {
     // Révéler tous les mots de l'article
     document.querySelectorAll('.hidden-word').forEach(word => {
@@ -521,21 +614,114 @@ async function updateLeaderboard() {
     }
 }
 
-function showGameInterface() { document.getElementById('connectionForm').style.display = 'none'; document.getElementById('playerStats').style.display = 'flex'; document.getElementById('guessForm').style.display = 'block'; document.getElementById('articleSection').style.display = 'block'; document.getElementById('guessHistorySection').style.display = 'block'; }
-function updatePlayerStats(player) { document.getElementById('playerScore').textContent = player.score; document.getElementById('playerAttempts').textContent = player.attempts; document.getElementById('foundWordsCount').textContent = player.found_words.length; document.getElementById('playerName').textContent = gameSession.playerName; }
+function showGameInterface() {
+    document.getElementById('connectionForm').style.display = 'none';
+    document.getElementById('playerStats').style.display = 'flex';
+    document.getElementById('guessForm').style.display = 'block';
+    document.getElementById('articleSection').style.display = 'block';
+}
 
-function updateGuessHistory() { const container = document.getElementById('guessHistory'); container.innerHTML = guessHistory.slice(0, 10).map(guess => { let badgeClass = guess.found ? 'bg-success' : 'bg-warning'; let proximityText = guess.found ? 'Trouvé !' : getProximityText(guess.proximity); return `<div class="d-flex justify-content-between align-items-center p-2 mb-1 bg-light rounded"><span><strong>${guess.word}</strong> <small class="text-muted">(${guess.timestamp})</small></span><span class="badge ${badgeClass}">${proximityText}</span></div>`; }).join(''); }
+function updatePlayerStats(player) {
+    document.getElementById('playerScore').textContent = player.score;
+    document.getElementById('playerAttempts').textContent = player.attempts;
+    document.getElementById('foundWordsCount').textContent = player.found_words.length;
+    document.getElementById('playerName').textContent = gameSession.playerName;
+    document.getElementById('totalAttempts').textContent = attemptCounter;
+}
 
-function displayLeaderboard(leaderboard) { const container = document.getElementById('leaderboard'); if (leaderboard.length === 0) { container.innerHTML = '<p class="text-muted text-center">Aucun joueur n\'a encore terminé</p>'; return; } container.innerHTML = leaderboard.map((player, index) => `<div class="leaderboard-item p-3"><div class="d-flex justify-content-between align-items-center"><div><span class="fw-bold">${index + 1}. ${player.player_name}</span><br><small class="text-muted">${player.attempts} tentatives</small></div><div class="text-end"><span class="fw-bold text-primary">${player.score}</span></div></div></div>`).join(''); }
+function updateGuessHistory() {
+    const container = document.getElementById('guessHistory');
 
-function displayActivePlayers(players) { const container = document.getElementById('activePlayers'); if (players.length === 0) { container.innerHTML = '<p class="text-muted text-center">Aucun joueur actif</p>'; return; } container.innerHTML = players.map(player => `<div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-light rounded"><div><span class="fw-bold">${player.player_name}</span><br><small class="text-muted">${player.found_words_count} mots</small></div><span class="badge bg-primary">${player.score}</span></div>`).join(''); }
+    if (guessHistory.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">Aucune tentative pour le moment</p>';
+        return;
+    }
 
-function showResult(message, type) { const container = document.getElementById('resultMessage'); container.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show">${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`; setTimeout(() => { const alert = container.querySelector('.alert'); if (alert) { const bsAlert = new bootstrap.Alert(alert); bsAlert.close(); } }, 5000); }
+    container.innerHTML = guessHistory.slice(0, 20).map(guess => {
+        let itemClass = 'guess-item';
+        let statusText = '';
 
-function showGameCompletedModal(player) { document.getElementById('finalScore').textContent = player.score; document.getElementById('finalAttempts').textContent = player.attempts; const modal = new bootstrap.Modal(document.getElementById('gameCompletedModal')); modal.show(); }
+        if (guess.found) {
+            itemClass += ' found';
+            statusText = 'Trouvé !';
+        } else if (guess.proximity > 0) {
+            itemClass += ' ' + getProximityClass(guess.proximity);
+            statusText = getProximityText(guess.proximity);
+        } else {
+            statusText = 'Pas trouvé';
+        }
 
-function copyRoomCode() { navigator.clipboard.writeText(roomCode).then(() => { showResult('Code de salle copié !', 'success'); }).catch(() => { const textArea = document.createElement('textarea'); textArea.value = roomCode; document.body.appendChild(textArea); textArea.select(); document.execCommand('copy'); document.body.removeChild(textArea); showResult('Code de salle copié !', 'success'); }); }
+        return `
+            <div class="${itemClass}">
+                <div class="d-flex align-items-center">
+                    <div class="guess-number">${guess.number}</div>
+                    <div class="flex-grow-1">
+                        <div class="fw-bold">${guess.word}</div>
+                        <small class="text-muted">${guess.timestamp}</small>
+                    </div>
+                </div>
+                <div class="text-end">
+                    <small class="badge ${guess.found ? 'bg-success' : 'bg-secondary'}">${statusText}</small>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
 
-async function loadGameData() { await loadArticleContent(); await updateLeaderboard(); }
+function displayLeaderboard(leaderboard) {
+    const container = document.getElementById('leaderboard');
+    if (leaderboard.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">Aucun joueur n\'a encore terminé</p>';
+        return;
+    }
+    container.innerHTML = leaderboard.map((player, index) => `<div class="leaderboard-item p-3"><div class="d-flex justify-content-between align-items-center"><div><span class="fw-bold">${index + 1}. ${player.player_name}</span><br><small class="text-muted">${player.attempts} tentatives</small></div><div class="text-end"><span class="fw-bold text-primary">${player.score}</span></div></div></div>`).join('');
+}
+
+function displayActivePlayers(players) {
+    const container = document.getElementById('activePlayers');
+    if (players.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">Aucun joueur actif</p>';
+        return;
+    }
+    container.innerHTML = players.map(player => `<div class="d-flex justify-content-between align-items-center p-2 mb-2 bg-light rounded"><div><span class="fw-bold">${player.player_name}</span><br><small class="text-muted">${player.found_words_count} mots</small></div><span class="badge bg-primary">${player.score}</span></div>`).join('');
+}
+
+function showResult(message, type) {
+    const container = document.getElementById('resultMessage');
+    container.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show">${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+    setTimeout(() => {
+        const alert = container.querySelector('.alert');
+        if (alert) {
+            const bsAlert = new bootstrap.Alert(alert);
+            bsAlert.close();
+        }
+    }, 5000);
+}
+
+function showGameCompletedModal(player) {
+    document.getElementById('finalScore').textContent = player.score;
+    document.getElementById('finalAttempts').textContent = player.attempts;
+    const modal = new bootstrap.Modal(document.getElementById('gameCompletedModal'));
+    modal.show();
+}
+
+function copyRoomCode() {
+    navigator.clipboard.writeText(roomCode).then(() => {
+        showResult('Code de salle copié !', 'success');
+    }).catch(() => {
+        const textArea = document.createElement('textarea');
+        textArea.value = roomCode;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        showResult('Code de salle copié !', 'success');
+    });
+}
+
+async function loadGameData() {
+    await loadArticleContent();
+    await updateLeaderboard();
+}
 </script>
 {% endblock %}

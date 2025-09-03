@@ -65,6 +65,22 @@ class PedantixService
         $room = $gameSession->getRoom();
         $content = $room->getContent();
 
+        // Vérifier si le mot a déjà été essayé par ce joueur
+        $normalizedGuess = $this->normalizeWord($guess);
+        $foundWordsNormalized = array_map([$this, 'normalizeWord'], $gameSession->getFoundWords());
+
+        if (in_array($normalizedGuess, $foundWordsNormalized)) {
+            return [
+                'found' => false,
+                'word' => $guess,
+                'proximity' => null,
+                'gameCompleted' => false,
+                'isExactMatch' => false,
+                'error' => 'Mot déjà trouvé',
+                'duplicate' => true
+            ];
+        }
+
         $gameSession->incrementAttempts();
         $gameSession->updateActivity();
 
@@ -73,12 +89,12 @@ class PedantixService
             'word' => $guess,
             'proximity' => null,
             'gameCompleted' => false,
-            'isExactMatch' => false
+            'isExactMatch' => false,
+            'duplicate' => false
         ];
 
         // Vérifier si c'est le mot-titre (victoire)
         $titleWords = $this->extractTitleWords($room->getTitle());
-        $normalizedGuess = $this->normalizeWord($guess);
 
         foreach ($titleWords as $titleWord) {
             if ($this->normalizeWord($titleWord) === $normalizedGuess) {
@@ -102,7 +118,7 @@ class PedantixService
             $result['found'] = true;
             $gameSession->addFoundWord($guess);
 
-            // Ajouter des points pour chaque mot trouvé
+            // Ajouter des points pour chaque mot trouvé (seulement si pas déjà trouvé)
             $currentScore = $gameSession->getScore() + 10;
             $gameSession->setScore($currentScore);
         } else {
@@ -138,6 +154,9 @@ class PedantixService
             return implode('', $processedWords);
         }
 
+        // Créer un mapping des mots de l'article vers les mots devinés les plus proches
+        $wordProximityMapping = $this->buildWordProximityMapping($content, $proximityData);
+
         // Comportement normal : diviser le contenu en mots tout en préservant la ponctuation et la structure
         $words = preg_split('/(\s+|[.,;:!?()"\'-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
 
@@ -149,17 +168,21 @@ class PedantixService
             } else {
                 // C'est un mot - vérifier s'il doit être dévoilé
                 $normalizedWord = $this->normalizeWord($word);
-                $isRevealed = in_array($normalizedWord, $foundWordsNormalized);
+                $isRevealed = $this->isWordRevealed($word, $foundWordsNormalized);
 
                 if ($isRevealed) {
+                    // Mot trouvé : affichage en texte noir normal sans arrière-plan
                     $processedWords[] = '<span class="revealed-word">' . htmlspecialchars($word) . '</span>';
                 } else {
-                    // Vérifier si ce mot a une proximité avec un mot deviné récemment
-                    $proximityClass = $this->getProximityClass($normalizedWord, $proximityData);
+                    // Vérifier si ce mot a une proximité avec un mot deviné
+                    if (isset($wordProximityMapping[$normalizedWord])) {
+                        $proximityInfo = $wordProximityMapping[$normalizedWord];
+                        $guessedWord = $proximityInfo['guessed_word'];
+                        $proximityScore = $proximityInfo['proximity'];
+                        $colorStyle = $this->getProximityColorStyle($proximityScore);
 
-                    if ($proximityClass) {
-                        // Afficher le mot avec la couleur de proximité mais il reste grisé
-                        $processedWords[] = '<span class="hidden-word ' . $proximityClass . '" data-word="' . htmlspecialchars($normalizedWord) . '">' . htmlspecialchars($word) . '</span>';
+                        // Afficher le mot deviné avec la couleur de proximité
+                        $processedWords[] = '<span class="hidden-word-with-proximity" style="' . $colorStyle . '" data-word="' . htmlspecialchars($normalizedWord) . '" data-guessed="' . htmlspecialchars($guessedWord) . '" data-proximity="' . $proximityScore . '">' . htmlspecialchars($guessedWord) . '</span>';
                     } else {
                         // Mot complètement caché
                         $processedWords[] = '<span class="hidden-word" data-word="' . htmlspecialchars($normalizedWord) . '">' . str_repeat('█', mb_strlen($word)) . '</span>';
@@ -171,63 +194,44 @@ class PedantixService
         return implode('', $processedWords);
     }
 
-    private function getProximityClass(string $normalizedWord, array $proximityData): ?string
+    /**
+     * Vérifie si un mot de l'article doit être révélé basé sur les mots trouvés par le joueur
+     * Prend en compte les conjugaisons et variations
+     */
+    private function isWordRevealed(string $articleWord, array $foundWordsNormalized): bool
     {
-        $maxProximity = 0;
-        $bestGuess = null;
+        $normalizedArticleWord = $this->normalizeWord($articleWord);
 
-        // Trouver la meilleure proximité pour ce mot
-        foreach ($proximityData as $data) {
-            if (!isset($data['word']) || !isset($data['proximity'])) continue;
+        // Vérification directe
+        if (in_array($normalizedArticleWord, $foundWordsNormalized)) {
+            return true;
+        }
 
-            $guessNormalized = $this->normalizeWord($data['word']);
-            $proximity = $data['proximity'];
-
-            // Calculer la proximité sémantique directe entre le mot de l'article et le guess
-            $semanticScore = $this->calculateSemanticSimilarity($normalizedWord, $guessNormalized);
-            if ($semanticScore > $maxProximity) {
-                $maxProximity = $semanticScore;
-                $bestGuess = $data;
+        // Vérifier si le mot de l'article est une conjugaison d'un des mots trouvés
+        foreach ($foundWordsNormalized as $foundWord) {
+            if ($this->isVerbConjugation($foundWord, $normalizedArticleWord)) {
+                return true;
             }
+        }
 
-            // Calculer aussi la similarité orthographique
-            $similarity = $this->calculateLevenshteinSimilarity($normalizedWord, $guessNormalized);
-            $orthoScore = 0;
-            if ($similarity > 0.8) {
-                $orthoScore = 800 + ($similarity * 100);
-            } elseif ($similarity > 0.6) {
-                $orthoScore = 400 + ($similarity * 200);
-            } elseif ($similarity > 0.4) {
-                $orthoScore = 100 + ($similarity * 100);
-            }
-
-            if ($orthoScore > $maxProximity) {
-                $maxProximity = $orthoScore;
-                $bestGuess = $data;
-            }
-
-            // Vérifier les sous-chaînes
-            if (strlen($normalizedWord) >= 3 && strlen($guessNormalized) >= 3) {
-                if (strpos($normalizedWord, $guessNormalized) !== false || strpos($guessNormalized, $normalizedWord) !== false) {
-                    $substringScore = 600;
-                    if ($substringScore > $maxProximity) {
-                        $maxProximity = $substringScore;
-                        $bestGuess = $data;
+        // Vérifier les contractions avec apostrophes
+        if (strpos($articleWord, "'") !== false) {
+            $parts = explode("'", $articleWord);
+            foreach ($parts as $part) {
+                $normalizedPart = $this->normalizeWord($part);
+                if (in_array($normalizedPart, $foundWordsNormalized)) {
+                    return true;
+                }
+                // Vérifier les conjugaisons pour chaque partie
+                foreach ($foundWordsNormalized as $foundWord) {
+                    if ($this->isVerbConjugation($foundWord, $normalizedPart)) {
+                        return true;
                     }
                 }
             }
         }
 
-        // Déterminer la classe CSS en fonction de la proximité maximale trouvée
-        if ($maxProximity >= 800) {
-            return 'proximity-very-close'; // Jaune clair - on brûle
-        } elseif ($maxProximity >= 400) {
-            return 'proximity-close'; // Orange
-        } elseif ($maxProximity >= 100) {
-            return 'proximity-distant'; // Orange foncé
-        }
-
-        return null;
+        return false;
     }
 
     public function getLeaderboard(Room $room): array
@@ -259,35 +263,58 @@ class PedantixService
 
         $context = stream_context_create([
             'http' => [
-                'header' => "User-Agent: PedantixApp/1.0\r\n"
+                'header' => "User-Agent: PedantixApp/1.0\r\n",
+                'timeout' => 30,
+                'ignore_errors' => true
             ]
         ]);
 
-        $summaryResponse = file_get_contents($summaryApiUrl, false, $context);
-        if ($summaryResponse === false) {
-            throw new \Exception('Impossible de récupérer l\'article Wikipedia');
+        try {
+            $summaryResponse = file_get_contents($summaryApiUrl, false, $context);
+
+            if ($summaryResponse === false) {
+                $error = error_get_last();
+                throw new \Exception('Impossible de récupérer l\'article Wikipedia: ' . ($error['message'] ?? 'Erreur de connexion'));
+            }
+
+            $summaryData = json_decode($summaryResponse, true);
+
+            if (!$summaryData) {
+                throw new \Exception('Réponse invalide de l\'API Wikipedia');
+            }
+
+            if (isset($summaryData['type']) && $summaryData['type'] === 'disambiguation') {
+                throw new \Exception('Cette page est une page de désambiguïsation. Veuillez choisir un article plus spécifique.');
+            }
+
+            if (!isset($summaryData['extract']) || empty($summaryData['extract'])) {
+                throw new \Exception('Contenu de l\'article introuvable ou vide');
+            }
+
+            // L'extract contient déjà un résumé propre de l'article
+            $content = $summaryData['extract'];
+
+            // Nettoyer un peu plus le contenu pour enlever les références restantes
+            $content = preg_replace('/\[[\d,\s]+\]/', '', $content); // Supprimer les références [1], [2,3], etc.
+            $content = preg_replace('/\s+/', ' ', $content); // Normaliser les espaces
+            $content = trim($content);
+
+            if (strlen($content) < 50) {
+                throw new \Exception('L\'article est trop court pour créer une partie intéressante');
+            }
+
+            $properTitle = $summaryData['title'] ?? $title;
+
+            return [
+                'title' => $properTitle,
+                'content' => $content,
+                'allWords' => $this->extractAllWords($content)
+            ];
+        } catch (\Exception $e) {
+            // Log l'erreur pour debugging
+            error_log('Erreur fetchWikipediaArticle: ' . $e->getMessage() . ' pour URL: ' . $url);
+            throw $e;
         }
-
-        $summaryData = json_decode($summaryResponse, true);
-        if (!$summaryData || !isset($summaryData['extract'])) {
-            throw new \Exception('Contenu de l\'article introuvable');
-        }
-
-        // L'extract contient déjà un résumé propre de l'article
-        $content = $summaryData['extract'];
-
-        // Nettoyer un peu plus le contenu pour enlever les références restantes
-        $content = preg_replace('/\[[\d,\s]+\]/', '', $content); // Supprimer les références [1], [2,3], etc.
-        $content = preg_replace('/\s+/', ' ', $content); // Normaliser les espaces
-        $content = trim($content);
-
-        $properTitle = $summaryData['title'] ?? $title;
-
-        return [
-            'title' => $properTitle,
-            'content' => $content,
-            'allWords' => $this->extractAllWords($content)
-        ];
     }
 
     private function cleanWikipediaContent(string $html): string
@@ -388,7 +415,7 @@ class PedantixService
     private function extractAllWordsFromContent(string $content): array
     {
         // Extraire tous les mots du contenu en préservant la structure
-        $words = preg_split('/(\s+|[.,;:!?()"\'-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $words = preg_split('/(\s+|[.,;:!?()"\-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
         $cleanWords = [];
 
         foreach ($words as $word) {
@@ -472,15 +499,108 @@ class PedantixService
                     if ($this->normalizeWord($part) === $normalizedGuess) {
                         return true;
                     }
+                    // Vérifier les conjugaisons pour les parties de mots avec apostrophe
+                    if ($this->isVerbConjugation($normalizedGuess, $this->normalizeWord($part))) {
+                        return true;
+                    }
                 }
             }
 
-            if ($this->normalizeWord($cleanWord) === $normalizedGuess) {
+            $normalizedWord = $this->normalizeWord($cleanWord);
+            if ($normalizedWord === $normalizedGuess) {
+                return true;
+            }
+
+            // Vérifier si le mot deviné est un infinitif et le mot de l'article une conjugaison
+            if ($this->isVerbConjugation($normalizedGuess, $normalizedWord)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Vérifie si un mot est une conjugaison d'un verbe à l'infinitif
+     */
+    private function isVerbConjugation(string $infinitive, string $word): bool
+    {
+        // Patterns de conjugaison française simplifiés
+        $conjugationPatterns = $this->getConjugationPatterns();
+
+        foreach ($conjugationPatterns as $ending => $replacements) {
+            if (str_ends_with($infinitive, $ending)) {
+                $stem = substr($infinitive, 0, -strlen($ending));
+
+                foreach ($replacements as $replacement) {
+                    $conjugated = $stem . $replacement;
+                    if ($conjugated === $word) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Vérifier aussi les verbes irréguliers les plus courants
+        $irregularVerbs = $this->getIrregularVerbs();
+        if (isset($irregularVerbs[$infinitive])) {
+            return in_array($word, $irregularVerbs[$infinitive]);
+        }
+
+        return false;
+    }
+
+    /**
+     * Patterns de conjugaison pour les verbes réguliers
+     */
+    private function getConjugationPatterns(): array
+    {
+        return [
+            'er' => [
+                'e', 'es', 'e', 'ons', 'ez', 'ent', // présent
+                'ais', 'ais', 'ait', 'ions', 'iez', 'aient', // imparfait
+                'ai', 'as', 'a', 'ames', 'ates', 'erent', // passé simple
+                'erai', 'eras', 'era', 'erons', 'erez', 'eront', // futur
+                'erais', 'erais', 'erait', 'erions', 'eriez', 'eraient', // conditionnel
+                'ant', 'e', // participes
+            ],
+            'ir' => [
+                'is', 'is', 'it', 'issons', 'issez', 'issent', // présent
+                'issais', 'issais', 'issait', 'issions', 'issiez', 'issaient', // imparfait
+                'is', 'is', 'it', 'imes', 'ites', 'irent', // passé simple
+                'irai', 'iras', 'ira', 'irons', 'irez', 'iront', // futur
+                'irais', 'irais', 'irait', 'irions', 'iriez', 'iraient', // conditionnel
+                'issant', 'i', // participes
+            ],
+            're' => [
+                's', 's', '', 'ons', 'ez', 'ent', // présent
+                'ais', 'ais', 'ait', 'ions', 'iez', 'aient', // imparfait
+                'is', 'is', 'it', 'imes', 'ites', 'irent', // passé simple
+                'rai', 'ras', 'ra', 'rons', 'rez', 'ront', // futur
+                'rais', 'rais', 'rait', 'rions', 'riez', 'raient', // conditionnel
+                'ant', 'u', // participes
+            ]
+        ];
+    }
+
+    /**
+     * Verbes irréguliers les plus courants
+     */
+    private function getIrregularVerbs(): array
+    {
+        return [
+            'etre' => ['suis', 'es', 'est', 'sommes', 'etes', 'sont', 'etais', 'etait', 'etions', 'etiez', 'etaient', 'fus', 'fut', 'fumes', 'furent', 'serai', 'seras', 'sera', 'serons', 'serez', 'seront', 'serais', 'serait', 'serions', 'seriez', 'seraient', 'etant', 'ete'],
+            'avoir' => ['ai', 'as', 'a', 'avons', 'avez', 'ont', 'avais', 'avait', 'avions', 'aviez', 'avaient', 'eus', 'eut', 'eumes', 'eurent', 'aurai', 'auras', 'aura', 'aurons', 'aurez', 'auront', 'aurais', 'aurait', 'aurions', 'auriez', 'auraient', 'ayant', 'eu'],
+            'aller' => ['vais', 'vas', 'va', 'allons', 'allez', 'vont', 'allais', 'allait', 'allions', 'alliez', 'allaient', 'allai', 'alla', 'allames', 'allerent', 'irai', 'iras', 'ira', 'irons', 'irez', 'iront', 'irais', 'irait', 'irions', 'iriez', 'iraient', 'allant', 'alle'],
+            'faire' => ['fais', 'fait', 'faisons', 'faites', 'font', 'faisais', 'faisait', 'faisions', 'faisiez', 'faisaient', 'fis', 'fit', 'fimes', 'firent', 'ferai', 'feras', 'fera', 'ferons', 'ferez', 'feront', 'ferais', 'ferait', 'ferions', 'feriez', 'feraient', 'faisant', 'fait'],
+            'dire' => ['dis', 'dit', 'disons', 'dites', 'disent', 'disais', 'disait', 'disions', 'disiez', 'disaient', 'dis', 'dit', 'dimes', 'dirent', 'dirai', 'diras', 'dira', 'dirons', 'direz', 'diront', 'dirais', 'dirait', 'dirions', 'diriez', 'diraient', 'disant', 'dit'],
+            'voir' => ['vois', 'voit', 'voyons', 'voyez', 'voient', 'voyais', 'voyait', 'voyions', 'voyiez', 'voyaient', 'vis', 'vit', 'vimes', 'virent', 'verrai', 'verras', 'verra', 'verrons', 'verrez', 'verront', 'verrais', 'verrait', 'verrions', 'verriez', 'verraient', 'voyant', 'vu'],
+            'savoir' => ['sais', 'sait', 'savons', 'savez', 'savent', 'savais', 'savait', 'savions', 'saviez', 'savaient', 'sus', 'sut', 'sumes', 'surent', 'saurai', 'sauras', 'saura', 'saurons', 'saurez', 'sauront', 'saurais', 'saurait', 'saurions', 'sauriez', 'sauraient', 'sachant', 'su'],
+            'pouvoir' => ['peux', 'peut', 'pouvons', 'pouvez', 'peuvent', 'pouvais', 'pouvait', 'pouvions', 'pouviez', 'pouvaient', 'pus', 'put', 'pumes', 'purent', 'pourrai', 'pourras', 'pourra', 'pourrons', 'pourrez', 'pourront', 'pourrais', 'pourrait', 'pourrions', 'pourriez', 'pourraient', 'pouvant', 'pu'],
+            'vouloir' => ['veux', 'veut', 'voulons', 'voulez', 'veulent', 'voulais', 'voulait', 'voulions', 'vouliez', 'voulaient', 'voulus', 'voulut', 'voulumes', 'voulurent', 'voudrai', 'voudras', 'voudra', 'voudrons', 'voudrez', 'voudront', 'voudrais', 'voudrait', 'voudrions', 'voudriez', 'voudraient', 'voulant', 'voulu'],
+            'venir' => ['viens', 'vient', 'venons', 'venez', 'viennent', 'venais', 'venait', 'venions', 'veniez', 'venaient', 'vins', 'vint', 'vinmes', 'vinrent', 'viendrai', 'viendras', 'viendra', 'viendrons', 'viendrez', 'viendront', 'viendrais', 'viendrait', 'viendrions', 'viendriez', 'viendraient', 'venant', 'venu'],
+            'partir' => ['pars', 'part', 'partons', 'partez', 'partent', 'partais', 'partait', 'partions', 'partiez', 'partaient', 'partis', 'partit', 'partimes', 'partirent', 'partirai', 'partiras', 'partira', 'partirons', 'partirez', 'partiront', 'partirais', 'partirait', 'partirions', 'partiriez', 'partiraient', 'partant', 'parti'],
+        ];
     }
 
     private function calculateSemanticProximity(string $guess, string $content, string $title): int
@@ -508,7 +628,7 @@ class PedantixService
             if (strlen($normalizedContentWord) >= 2 && !in_array($normalizedContentWord, $this->getStopWords())) {
 
                 // 1. Vérifier la similarité sémantique directe
-                $semanticScore = $this->calculateSemanticSimilarity($normalizedGuess, $normalizedContentWord);
+                $semanticScore = $this->calculateSemanticSimilarity($normalizedContentWord, $normalizedGuess);
                 if ($semanticScore > 0) {
                     $maxProximity = max($maxProximity, $semanticScore);
                 }
@@ -656,5 +776,69 @@ class PedantixService
             'cette', 'ces', 'ses', 'leur', 'leurs', 'aux', 'nous', 'vous', 'ils', 'elles',
             'est', 'sont', 'était', 'ont', 'peut', 'fait', 'très', 'bien', 'deux', 'aussi'
         ];
+    }
+
+    private function buildWordProximityMapping(string $content, array $proximityData): array
+    {
+        $mapping = [];
+
+        if (empty($proximityData)) {
+            return $mapping;
+        }
+
+        // Extraire tous les mots de l'article
+        $allContentWords = $this->extractAllWordsFromContent($content);
+
+        foreach ($proximityData as $proximityInfo) {
+            $guessedWord = $proximityInfo['word'];
+            $proximityScore = $proximityInfo['proximity'];
+
+            // Trouver le meilleur mot de l'article pour afficher ce mot deviné
+            $bestMatch = null;
+            $bestSimilarity = 0;
+
+            foreach ($allContentWords as $contentWord) {
+                $normalizedContentWord = $this->normalizeWord($contentWord);
+                $normalizedGuessedWord = $this->normalizeWord($guessedWord);
+
+                // Calculer la similarité entre le mot deviné et le mot de l'article
+                $similarity = $this->calculateLevenshteinSimilarity($normalizedGuessedWord, $normalizedContentWord);
+
+                if ($similarity > $bestSimilarity && $similarity > 0.3) {
+                    $bestSimilarity = $similarity;
+                    $bestMatch = $normalizedContentWord;
+                }
+            }
+
+            // Si on a trouvé un match suffisamment bon, l'ajouter au mapping
+            if ($bestMatch !== null) {
+                $mapping[$bestMatch] = [
+                    'guessed_word' => $guessedWord,
+                    'proximity' => $proximityScore
+                ];
+            }
+        }
+
+        return $mapping;
+    }
+
+    private function getProximityColorStyle(int $proximityScore): string
+    {
+        if ($proximityScore >= 900) {
+            // Très chaud - jaune/or
+            return 'background: linear-gradient(45deg, #FFEB3B, #FFC107) !important; color: #333 !important;';
+        } elseif ($proximityScore >= 700) {
+            // Chaud - orange
+            return 'background: linear-gradient(45deg, #FF9800, #F57C00) !important; color: white !important;';
+        } elseif ($proximityScore >= 500) {
+            // Tiède - orange plus clair
+            return 'background: linear-gradient(45deg, #FF9800, #FFB74D) !important; color: white !important;';
+        } elseif ($proximityScore >= 300) {
+            // Froid - gris
+            return 'background: linear-gradient(45deg, #9E9E9E, #757575) !important; color: white !important;';
+        } else {
+            // Très froid - gris foncé
+            return 'background: linear-gradient(45deg, #757575, #424242) !important; color: white !important;';
+        }
     }
 }
