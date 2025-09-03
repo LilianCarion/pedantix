@@ -157,6 +157,9 @@ class PedantixService
         // Créer un mapping des mots de l'article vers les mots devinés les plus proches
         $wordProximityMapping = $this->buildWordProximityMapping($content, $proximityData);
 
+        // Créer un mapping des proximités sémantiques pour les mots trouvés
+        $semanticProximityMapping = $this->buildSemanticProximityMapping($content, $foundWords);
+
         // Comportement normal : diviser le contenu en mots tout en préservant la ponctuation et la structure
         $words = preg_split('/(\s+|[.,;:!?()"\'-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
 
@@ -174,8 +177,17 @@ class PedantixService
                     // Mot trouvé : affichage en texte noir normal sans arrière-plan
                     $processedWords[] = '<span class="revealed-word">' . htmlspecialchars($word) . '</span>';
                 } else {
-                    // Vérifier si ce mot a une proximité avec un mot deviné
-                    if (isset($wordProximityMapping[$normalizedWord])) {
+                    // Vérifier si ce mot a une proximité sémantique avec un mot trouvé
+                    if (isset($semanticProximityMapping[$normalizedWord])) {
+                        $semanticInfo = $semanticProximityMapping[$normalizedWord];
+                        $foundWord = $semanticInfo['found_word'];
+                        $proximityScore = $semanticInfo['proximity'];
+                        $colorStyle = $this->getProximityColorStyle($proximityScore);
+
+                        // Afficher le mot trouvé avec la couleur de proximité sémantique
+                        $processedWords[] = '<span class="hidden-word-with-proximity" style="' . $colorStyle . '" data-word="' . htmlspecialchars($normalizedWord) . '" data-found="' . htmlspecialchars($foundWord) . '" data-proximity="' . $proximityScore . '">' . htmlspecialchars($foundWord) . '</span>';
+                    } else if (isset($wordProximityMapping[$normalizedWord])) {
+                        // Vérifier la proximité avec les mots devinés mais non trouvés
                         $proximityInfo = $wordProximityMapping[$normalizedWord];
                         $guessedWord = $proximityInfo['guessed_word'];
                         $proximityScore = $proximityInfo['proximity'];
@@ -622,6 +634,16 @@ class PedantixService
             }
         }
 
+        // Vérifier si le mot deviné est un nombre ou une date
+        $isGuessNumber = $this->isNumber($guess);
+        $isGuessDate = $this->isDate($guess);
+
+        // Si le mot deviné est un nombre ou une date, vérifier la proximité avec les nombres/dates de l'article
+        if ($isGuessNumber || $isGuessDate) {
+            $numbersAndDatesProximity = $this->calculateNumbersAndDatesProximity($guess, $content, $isGuessNumber, $isGuessDate);
+            $maxProximity = max($maxProximity, $numbersAndDatesProximity);
+        }
+
         // Nouveau système de proximité sémantique avancé
         foreach ($allContentWords as $contentWord) {
             $normalizedContentWord = $this->normalizeWord($contentWord);
@@ -658,6 +680,206 @@ class PedantixService
         }
 
         return min(999, $maxProximity);
+    }
+
+    /**
+     * Vérifie si une chaîne représente un nombre
+     */
+    private function isNumber(string $text): bool
+    {
+        // Enlever les espaces et normaliser
+        $text = trim($text);
+
+        // Vérifier les nombres entiers
+        if (preg_match('/^\d+$/', $text)) {
+            return true;
+        }
+
+        // Vérifier les nombres décimaux (avec . ou ,)
+        if (preg_match('/^\d+[.,]\d+$/', $text)) {
+            return true;
+        }
+
+        // Vérifier les nombres avec séparateurs de milliers
+        if (preg_match('/^\d{1,3}([ .,]\d{3})*$/', $text)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Vérifie si une chaîne représente une date
+     */
+    private function isDate(string $text): bool
+    {
+        $text = trim($text);
+
+        // Formats de dates courants
+        $datePatterns = [
+            '/^\d{1,2}\/\d{1,2}\/\d{2,4}$/', // 15/08/1995 ou 15/08/95
+            '/^\d{1,2}-\d{1,2}-\d{2,4}$/',   // 15-08-1995 ou 15-08-95
+            '/^\d{4}-\d{1,2}-\d{1,2}$/',     // 1995-08-15
+            '/^\d{1,2}\s+\w+\s+\d{4}$/',     // 15 août 1995
+            '/^\w+\s+\d{1,2},?\s+\d{4}$/',   // août 15, 1995
+            '/^\d{4}$/',                      // 1995 (année seule)
+        ];
+
+        foreach ($datePatterns as $pattern) {
+            if (preg_match($pattern, $text)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Calcule la proximité entre un nombre/date deviné et les nombres/dates de l'article
+     */
+    private function calculateNumbersAndDatesProximity(string $guess, string $content, bool $isGuessNumber, bool $isGuessDate): int
+    {
+        $maxProximity = 0;
+
+        // Extraire tous les nombres et dates du contenu
+        $words = preg_split('/\s+/', $content);
+
+        foreach ($words as $word) {
+            $cleanWord = preg_replace('/[^\w\d\/\-.,]/', '', $word);
+
+            if ($isGuessNumber && $this->isNumber($cleanWord)) {
+                $proximity = $this->calculateNumberProximity($guess, $cleanWord);
+                $maxProximity = max($maxProximity, $proximity);
+            }
+
+            if ($isGuessDate && $this->isDate($cleanWord)) {
+                $proximity = $this->calculateDateProximity($guess, $cleanWord);
+                $maxProximity = max($maxProximity, $proximity);
+            }
+        }
+
+        return $maxProximity;
+    }
+
+    /**
+     * Calcule la proximité entre deux nombres
+     */
+    private function calculateNumberProximity(string $number1, string $number2): int
+    {
+        // Convertir en nombres pour comparaison
+        $num1 = $this->parseNumber($number1);
+        $num2 = $this->parseNumber($number2);
+
+        if ($num1 === null || $num2 === null) {
+            return 0;
+        }
+
+        // Si les nombres sont identiques
+        if ($num1 == $num2) {
+            return 950;
+        }
+
+        // Calculer la différence relative
+        $diff = abs($num1 - $num2);
+        $average = ($num1 + $num2) / 2;
+        $relativeDiff = $average > 0 ? ($diff / $average) : 1;
+
+        // Plus la différence relative est petite, plus la proximité est haute
+        if ($relativeDiff <= 0.1) {
+            return 850; // Très proche (différence de 10% ou moins)
+        } elseif ($relativeDiff <= 0.25) {
+            return 700; // Proche (différence de 25% ou moins)
+        } elseif ($relativeDiff <= 0.5) {
+            return 500; // Moyennement proche
+        } elseif ($relativeDiff <= 1.0) {
+            return 300; // Assez proche
+        } elseif ($relativeDiff <= 2.0) {
+            return 150; // Distant mais détectable
+        }
+
+        return 0;
+    }
+
+    /**
+     * Calcule la proximité entre deux dates
+     */
+    private function calculateDateProximity(string $date1, string $date2): int
+    {
+        $timestamp1 = $this->parseDate($date1);
+        $timestamp2 = $this->parseDate($date2);
+
+        if ($timestamp1 === null || $timestamp2 === null) {
+            return 0;
+        }
+
+        // Si les dates sont identiques
+        if ($timestamp1 == $timestamp2) {
+            return 950;
+        }
+
+        // Calculer la différence en jours
+        $diffDays = abs($timestamp1 - $timestamp2) / (60 * 60 * 24);
+
+        // Proximité basée sur la différence en jours
+        if ($diffDays <= 7) {
+            return 850; // Même semaine
+        } elseif ($diffDays <= 30) {
+            return 700; // Même mois approximativement
+        } elseif ($diffDays <= 365) {
+            return 500; // Même année approximativement
+        } elseif ($diffDays <= 1825) { // 5 ans
+            return 300; // Proche dans le temps
+        } elseif ($diffDays <= 3650) { // 10 ans
+            return 150; // Assez proche
+        }
+
+        return 0;
+    }
+
+    /**
+     * Parse un nombre depuis une chaîne
+     */
+    private function parseNumber(string $numberStr): ?float
+    {
+        $numberStr = trim($numberStr);
+        $numberStr = str_replace([' ', ','], ['', '.'], $numberStr);
+        $numberStr = preg_replace('/[^\d.]/', '', $numberStr);
+
+        if (is_numeric($numberStr)) {
+            return (float) $numberStr;
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse une date depuis une chaîne
+     */
+    private function parseDate(string $dateStr): ?int
+    {
+        $dateStr = trim($dateStr);
+
+        // Si c'est juste une année
+        if (preg_match('/^\d{4}$/', $dateStr)) {
+            return mktime(0, 0, 0, 1, 1, (int)$dateStr);
+        }
+
+        // Essayer différents formats
+        $formats = [
+            'd/m/Y', 'd-m-Y', 'Y-m-d', 'd/m/y', 'd-m-y',
+            'j F Y', 'F j, Y', 'j M Y', 'M j, Y'
+        ];
+
+        foreach ($formats as $format) {
+            $date = \DateTime::createFromFormat($format, $dateStr);
+            if ($date !== false) {
+                return $date->getTimestamp();
+            }
+        }
+
+        // Essayer strtotime comme dernier recours
+        $timestamp = strtotime($dateStr);
+        return $timestamp !== false ? $timestamp : null;
     }
 
     private function calculateSemanticSimilarity(string $word1, string $word2): int
@@ -822,23 +1044,72 @@ class PedantixService
         return $mapping;
     }
 
+    /**
+     * Construit un mapping des proximités sémantiques pour les mots trouvés
+     */
+    private function buildSemanticProximityMapping(string $content, array $foundWords): array
+    {
+        $mapping = [];
+
+        if (empty($foundWords)) {
+            return $mapping;
+        }
+
+        // Extraire tous les mots de l'article
+        $allContentWords = $this->extractAllWordsFromContent($content);
+
+        foreach ($foundWords as $foundWord) {
+            $normalizedFoundWord = $this->normalizeWord($foundWord);
+
+            // Pour chaque mot de l'article, vérifier s'il a une proximité sémantique avec ce mot trouvé
+            foreach ($allContentWords as $contentWord) {
+                $normalizedContentWord = $this->normalizeWord($contentWord);
+
+                // Éviter de remapper le mot sur lui-même s'il est déjà à sa place exacte
+                if ($normalizedContentWord === $normalizedFoundWord) {
+                    continue;
+                }
+
+                // Calculer la proximité sémantique
+                $semanticScore = $this->calculateSemanticSimilarity($normalizedFoundWord, $normalizedContentWord);
+
+                // Si il y a une proximité sémantique significative
+                if ($semanticScore >= 700) { // Seuil élevé pour l'affichage sémantique
+                    // Seulement si ce mot n'a pas déjà un mapping avec un score plus élevé
+                    if (!isset($mapping[$normalizedContentWord]) || $mapping[$normalizedContentWord]['proximity'] < $semanticScore) {
+                        $mapping[$normalizedContentWord] = [
+                            'found_word' => $foundWord,
+                            'proximity' => $semanticScore
+                        ];
+                    }
+                }
+            }
+        }
+
+        return $mapping;
+    }
+
     private function getProximityColorStyle(int $proximityScore): string
     {
+        // Nouveau système : fond grisé avec texte coloré
+        // Jaune très clair = très proche, orange foncé = éloigné
+        $baseStyle = 'background: #d0d0d0 !important; padding: 1px 2px !important; border-radius: 3px !important;';
+
         if ($proximityScore >= 900) {
-            // Très chaud - jaune/or
-            return 'background: linear-gradient(45deg, #FFEB3B, #FFC107) !important; color: #333 !important;';
+            // Très chaud - texte jaune très clair (proche)
+            return $baseStyle . ' color: #FFFF99 !important; font-weight: bold !important;';
         } elseif ($proximityScore >= 700) {
-            // Chaud - orange
-            return 'background: linear-gradient(45deg, #FF9800, #F57C00) !important; color: white !important;';
+            // Chaud - texte jaune doré
+            return $baseStyle . ' color: #FFD700 !important; font-weight: bold !important;';
         } elseif ($proximityScore >= 500) {
-            // Tiède - orange plus clair
-            return 'background: linear-gradient(45deg, #FF9800, #FFB74D) !important; color: white !important;';
+            // Tiède - texte orange clair
+            return $baseStyle . ' color: #FFB347 !important;';
         } elseif ($proximityScore >= 300) {
-            // Froid - gris
-            return 'background: linear-gradient(45deg, #9E9E9E, #757575) !important; color: white !important;';
+            // Froid - texte orange
+            return $baseStyle . ' color: #FF8C00 !important;';
         } else {
-            // Très froid - gris foncé
-            return 'background: linear-gradient(45deg, #757575, #424242) !important; color: white !important;';
+            // Très froid - texte orange foncé (éloigné)
+            return $baseStyle . ' color: #CC5500 !important;';
         }
     }
 }
