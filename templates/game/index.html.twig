@@ -29,9 +29,14 @@
                     <form id="createRoomForm">
                         <div class="mb-4">
                             <label for="wikipediaUrl" class="form-label fw-bold">URL de l'article Wikipedia :</label>
-                            <input type="url" class="form-control word-input" id="wikipediaUrl"
-                                   placeholder="https://fr.wikipedia.org/wiki/..." required>
-                            <div class="form-text">Collez l'URL d'un article Wikipedia français</div>
+                            <div class="input-group">
+                                <input type="url" class="form-control word-input" id="wikipediaUrl"
+                                       placeholder="https://fr.wikipedia.org/wiki/..." required>
+                                <button type="button" class="btn btn-outline-secondary" onclick="getRandomArticle()">
+                                    <i class="fas fa-random me-1"></i>Aléatoire
+                                </button>
+                            </div>
+                            <div class="form-text">Collez l'URL d'un article Wikipedia français ou utilisez le bouton aléatoire</div>
                         </div>
 
                         <div class="mb-4">
@@ -65,6 +70,14 @@
                         <button type="submit" class="btn btn-primary btn-lg">
                             <i class="fas fa-rocket me-2"></i>Créer la salle
                         </button>
+
+                        <!-- Bouton pour créer une partie aléatoire directement -->
+                        <div class="mt-3">
+                            <button type="button" class="btn btn-outline-primary btn-lg" onclick="createRandomRoom()">
+                                <i class="fas fa-dice me-2"></i>Partie aléatoire mystère
+                            </button>
+                            <div class="form-text">Crée une partie avec un article surprise (titre caché)</div>
+                        </div>
                     </form>
                 </div>
 
@@ -228,6 +241,71 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         `;
+    }
+
+    window.getRandomArticle = async function() {
+        showAlert('Chargement d\'un article aléatoire...', 'info');
+
+        try {
+            const response = await fetch('/api/random-article');
+            const data = await response.json();
+
+            if (data.success) {
+                document.getElementById('wikipediaUrl').value = data.article.url;
+                showAlert(`Article aléatoire chargé : ${data.article.title}`, 'success');
+            } else {
+                showAlert(data.error || 'Erreur lors du chargement de l\'article aléatoire', 'danger');
+            }
+        } catch (error) {
+            console.error('Erreur lors du chargement de l\'article aléatoire:', error);
+            showAlert('Erreur de connexion lors du chargement de l\'article aléatoire. Veuillez réessayer.', 'danger');
+        }
+    }
+
+    // Fonction pour créer automatiquement une room avec un article aléatoire SANS révéler le titre
+    window.createRandomRoom = async function() {
+        showAlert('Création d\'une partie avec article mystère...', 'info');
+
+        try {
+            // D'abord récupérer un article aléatoire
+            const randomResponse = await fetch('/api/random-article');
+            const randomData = await randomResponse.json();
+
+            if (!randomData.success) {
+                showAlert(randomData.error || 'Aucun article aléatoire disponible', 'danger');
+                return;
+            }
+
+            // Ensuite créer la room avec cet article SANS afficher le titre côté client
+            const gameMode = document.querySelector('input[name="gameMode"]:checked')?.value || 'competition';
+
+            const createResponse = await fetch('/create-room', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    wikipedia_url: randomData.article.url,
+                    game_mode: gameMode
+                })
+            });
+
+            const createData = await createResponse.json();
+
+            if (createData.success) {
+                const modeText = createData.game_mode === 'cooperation' ? ' (Mode Coopération)' : ' (Mode Compétition)';
+                // NE PAS afficher le titre de l'article pour éviter de spoiler
+                showAlert(`Salle créée avec succès ! Code: <strong>${createData.room_code}</strong><br>Article mystère sélectionné${modeText}`, 'success');
+                setTimeout(() => {
+                    window.location.href = `/game/${createData.room_code}`;
+                }, 2000);
+            } else {
+                showAlert(createData.error || 'Erreur lors de la création de la salle', 'danger');
+            }
+        } catch (error) {
+            console.error('Erreur lors de la création automatique:', error);
+            showAlert('Erreur de connexion. Veuillez réessayer.', 'danger');
+        }
     }
 });
 </script>

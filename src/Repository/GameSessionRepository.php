@@ -57,6 +57,49 @@ class GameSessionRepository extends ServiceEntityRepository
             ->getResult();
     }
 
+    public function getCompletedSessions(Room $room): array
+    {
+        return $this->createQueryBuilder('gs')
+            ->andWhere('gs.room = :room')
+            ->andWhere('gs.isCompleted = true')
+            ->setParameter('room', $room)
+            ->orderBy('gs.completedAt', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    public function getRecentCompletions(Room $room, int $lastEventId): array
+    {
+        // Calculer la vraie valeur de lastEventId en soustrayant l'offset
+        $realLastEventId = max(0, $lastEventId - 1000);
+
+        return $this->createQueryBuilder('gs')
+            ->andWhere('gs.room = :room')
+            ->andWhere('gs.isCompleted = true')
+            ->andWhere('gs.id > :lastEventId')
+            ->andWhere('gs.completedAt > :recentTime') // Seulement les complétions récentes (dernières 5 minutes)
+            ->setParameter('room', $room)
+            ->setParameter('lastEventId', $realLastEventId)
+            ->setParameter('recentTime', new \DateTimeImmutable('-5 minutes'))
+            ->orderBy('gs.completedAt', 'DESC')
+            ->setMaxResults(10)
+            ->getQuery()
+            ->getResult();
+    }
+
+    public function getWinner(Room $room): ?GameSession
+    {
+        return $this->createQueryBuilder('gs')
+            ->andWhere('gs.room = :room')
+            ->andWhere('gs.isCompleted = true')
+            ->setParameter('room', $room)
+            ->orderBy('gs.score', 'DESC')
+            ->addOrderBy('gs.completedAt', 'ASC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
     public function save(GameSession $entity, bool $flush = false): void
     {
         $this->getEntityManager()->persist($entity);

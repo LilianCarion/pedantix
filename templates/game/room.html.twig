@@ -307,6 +307,17 @@
 
             <!-- Article Wikipedia avec mots grisés -->
             <div id="articleSection" style="display: none;">
+                <!-- Progression du titre à deviner -->
+                <div id="titleProgressSection" class="mb-4" style="display: none;">
+                    <h5 class="text-center mb-3">
+                        <i class="fas fa-bullseye text-warning me-2"></i>Mot/Titre à deviner :
+                    </h5>
+                    <div class="text-center p-3 bg-light rounded">
+                        <h3 id="titleProgress" class="mb-0 text-primary font-monospace"></h3>
+                        <small id="titleProgressInfo" class="text-muted"></small>
+                    </div>
+                </div>
+
                 <h5 class="mb-3">Article Wikipedia :</h5>
                 <div id="articleContent" class="article-content">
                     Chargement de l'article...
@@ -381,7 +392,7 @@
                 </h5>
             </div>
             <div class="modal-body text-center">
-                <h3>🎉 Vous avez trouvé le mot-titre ! 🎉</h3>
+                <h3>���� Vous avez trouvé le mot-titre ! 🎉</h3>
                 <p class="lead">Score final: <span id="finalScore" class="fw-bold text-success"></span></p>
                 <p>Tentatives: <span id="finalAttempts" class="fw-bold"></span></p>
                 <div id="confettiContainer"></div>
@@ -404,8 +415,10 @@
 let gameSession = null;
 let roomCode = '{{ room_code }}';
 let guessHistory = [];
-let uniqueWords = new Set(); // Pour éviter les doublons
-let attemptCounter = 0; // Compteur unique des tentatives
+let uniqueWords = new Set();
+let attemptCounter = 0;
+let lastEventId = 0; // Pour suivre les événements temps réel
+let gameEventsInterval = null; // Interval pour les événements
 
 document.addEventListener('DOMContentLoaded', function() {
     // Vérifier si on a déjà une session stockée
@@ -448,7 +461,234 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Actualiser l'article périodiquement pour voir les mots trouvés par d'autres joueurs
     setInterval(loadArticleContent, 5000); // Toutes les 5 secondes
+
+    // Démarrer la surveillance des événements temps réel
+    startGameEventsPolling();
 });
+
+// Fonction pour surveiller les événements de jeu en temps réel
+function startGameEventsPolling() {
+    if (gameEventsInterval) {
+        clearInterval(gameEventsInterval);
+    }
+
+    gameEventsInterval = setInterval(async () => {
+        if (gameSession) {
+            await checkGameEvents();
+        }
+    }, 3000); // Vérifier toutes les 3 secondes
+}
+
+// Vérifier les nouveaux év��nements de jeu
+async function checkGameEvents() {
+    if (!gameSession) return;
+
+    try {
+        const response = await fetch(`/api/game-events/${roomCode}?session_id=${gameSession.sessionId}&last_event_id=${lastEventId}`);
+        const data = await response.json();
+
+        if (data.events && data.events.length > 0) {
+            // Traiter chaque nouvel événement
+            data.events.forEach(event => {
+                handleGameEvent(event);
+            });
+
+            lastEventId = data.last_event_id;
+        }
+
+        // Vérifier l'état global du jeu
+        if (data.game_status) {
+            handleGameStatus(data.game_status);
+        }
+    } catch (error) {
+        console.error('Erreur lors de la vérification des événements:', error);
+    }
+}
+
+// Gérer un événement de jeu
+function handleGameEvent(event) {
+    switch (event.type) {
+        case 'player_won':
+            // Afficher une notification quand un autre joueur trouve le mot
+            if (event.player_name !== gameSession.playerName) {
+                showPlayerWonNotification(event);
+            }
+            break;
+        case 'game_completed':
+            // Le jeu est terminé globalement
+            handleGameCompleted(event);
+            break;
+    }
+}
+
+// Afficher une notification quand un joueur trouve le mot
+function showPlayerWonNotification(event) {
+    const notification = document.createElement('div');
+    notification.className = 'alert alert-success alert-dismissible fade show position-fixed';
+    notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+    notification.innerHTML = `
+        <strong><i class="fas fa-trophy text-warning me-2"></i>${event.message}</strong>
+        <br><small>Score: ${event.score} - ${event.attempts} tentatives</small>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    document.body.appendChild(notification);
+
+    // Animation d'entrée
+    setTimeout(() => {
+        notification.classList.add('show');
+    }, 100);
+
+    // Supprimer automatiquement après 5 secondes
+    setTimeout(() => {
+        notification.remove();
+    }, 5000);
+
+    // Mettre à jour le classement
+    updateLeaderboard();
+}
+
+// Gérer l'état global du jeu
+function handleGameStatus(gameStatus) {
+    if (gameStatus.is_completed) {
+        // Arrêter la surveillance des événements
+        if (gameEventsInterval) {
+            clearInterval(gameEventsInterval);
+            gameEventsInterval = null;
+        }
+
+        // Afficher le modal de fin de partie globale pour tous les modes
+        showGameGloballyCompletedModal(gameStatus);
+    }
+}
+
+// Modal de fin de partie globale (tous les joueurs ont terminé)
+function showGameGloballyCompletedModal(gameStatus) {
+    // Créer le modal de fin de partie globale
+    let modalContent = '';
+
+    if (gameStatus.game_mode === 'cooperation') {
+        // Mode coopération - message d'équipe
+        modalContent = `
+            <div class="modal-body text-center">
+                <h3>🎉 L'équipe a trouvé le mot-titre ! 🎉</h3>
+                ${gameStatus.team && gameStatus.team.length > 0 ? `
+                    <div class="alert alert-success">
+                        <h4><i class="fas fa-users text-success me-2"></i>Équipe gagnante :</h4>
+                        ${gameStatus.team.map(player => `
+                            <p class="mb-1">${player.player_name} - Score: ${player.score} (${player.attempts} tentatives)</p>
+                        `).join('')}
+                    </div>
+                ` : ''}
+                <p class="lead">Félicitations à toute l'équipe ! Que souhaitez-vous faire maintenant ?</p>
+            </div>
+        `;
+    } else {
+        // Mode compétition - message de gagnant
+        modalContent = `
+            <div class="modal-body text-center">
+                <h3>🏁 Tous les joueurs ont trouvé le mot-titre ! 🏁</h3>
+                ${gameStatus.winner ? `
+                    <div class="alert alert-warning">
+                        <h4><i class="fas fa-crown text-warning me-2"></i>Gagnant: ${gameStatus.winner.player_name}</h4>
+                        <p>Score: ${gameStatus.winner.score} - ${gameStatus.winner.attempts} tentatives</p>
+                    </div>
+                ` : ''}
+                <p class="lead">Que souhaitez-vous faire maintenant ?</p>
+            </div>
+        `;
+    }
+
+    const modalHTML = `
+        <div class="modal fade" id="gameGloballyCompletedModal" tabindex="-1" data-bs-backdrop="static">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header ${gameStatus.game_mode === 'cooperation' ? 'bg-success' : 'bg-primary'} text-white">
+                        <h5 class="modal-title">
+                            <i class="fas fa-${gameStatus.game_mode === 'cooperation' ? 'hands-helping' : 'flag-checkered'} me-2"></i>Partie terminée !
+                        </h5>
+                    </div>
+                    ${modalContent}
+                    <div class="modal-footer justify-content-center">
+                        <button type="button" class="btn btn-success btn-lg me-3" onclick="startNewGame()">
+                            <i class="fas fa-play me-2"></i>Nouvelle partie
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-lg" onclick="window.location.href='/'">
+                            <i class="fas fa-home me-2"></i>Accueil
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Ajouter le modal au DOM s'il n'existe pas
+    if (!document.getElementById('gameGloballyCompletedModal')) {
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+    }
+
+    // Afficher le modal
+    const modal = new bootstrap.Modal(document.getElementById('gameGloballyCompletedModal'));
+    modal.show();
+}
+
+// Aller à la page de récapitulatif
+function goToRecapPage() {
+    // Au lieu d'aller aux stats, démarrer une nouvelle partie
+    startNewGame();
+}
+
+// Démarrer une nouvelle partie
+async function startNewGame() {
+    try {
+        if (!gameSession || !gameSession.sessionId) {
+            // Pas de session, retourner à l'accueil
+            window.location.href = '/';
+            return;
+        }
+
+        // Désactiver temporairement le bouton pendant la création
+        const button = event?.target;
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Création en cours...';
+        }
+
+        // Appeler directement l'API pour créer une nouvelle partie avec un article aléatoire
+        const response = await fetch('/api/new-game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_room_code: roomCode,
+                session_id: gameSession.sessionId
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Succès : recharger la page avec le nouvel article
+            showResult(`Nouvelle partie créée ! Article: ${data.new_article_title}`, 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        } else {
+            // Erreur
+            showResult(`Erreur : ${data.error}`, 'danger');
+            if (button) {
+                button.disabled = false;
+                button.innerHTML = '<i class="fas fa-play me-2"></i>Nouvelle partie';
+            }
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+        showResult('Erreur de connexion. Veuillez réessayer.', 'danger');
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-play me-2"></i>Nouvelle partie';
+        }
+    }
+}
 
 async function joinRoom(playerName) {
     try {
@@ -523,13 +763,11 @@ async function submitGuess(guess) {
             const result = data.result;
             const normalizedGuess = guess.toLowerCase();
 
-            // Si c'est un doublon détecté par le serveur, ne pas traiter
             if (result.duplicate) {
-                showResult(`Le mot "${result.word}" a déjà ��té essayé !`, 'warning');
+                showResult(`Le mot "${result.word}" a déjà été essayé !`, 'warning');
                 return;
             }
 
-            // Ajouter le mot à l'ensemble des mots uniques et à l'historique seulement si nouveau
             if (!uniqueWords.has(normalizedGuess)) {
                 uniqueWords.add(normalizedGuess);
                 attemptCounter++;
@@ -542,20 +780,26 @@ async function submitGuess(guess) {
                     timestamp: new Date().toLocaleTimeString()
                 });
 
+                // Stocker les proximités localement pour éviter qu'elles disparaissent
+                if (!result.found && result.proximity > 0) {
+                    storeProximityLocally(result.word, result.proximity);
+                }
+
                 if (result.found) {
                     if (result.gameCompleted) {
-                        // Victoire ! Révéler tout l'article
+                        // Victoire personnelle ! - Juste afficher le message et les confettis
                         showResult(`🎉 VICTOIRE ! Vous avez trouvé "${result.word}" !`, 'success');
                         revealAllWords();
                         showConfetti();
-                        setTimeout(() => showGameCompletedModal(data.player), 1000);
+
+                        // Déclencher immédiatement la vérification des événements pour notifier les autres
+                        setTimeout(() => checkGameEvents(), 500);
                     } else {
                         showResult(`✅ "${result.word}" trouvé dans l'article !`, 'success');
-                        loadArticleContent(); // Recharger pour voir le mot révélé
+                        loadArticleContent();
                     }
                 } else {
-                    // Ne plus afficher de message de proximité - juste recharger l'article
-                    loadArticleContent(); // Recharger pour voir les suggestions colorées
+                    loadArticleContent();
                 }
 
                 updatePlayerStats(data.player);
@@ -563,7 +807,6 @@ async function submitGuess(guess) {
                 updateLeaderboard();
             }
         } else {
-            // Gérer les erreurs du serveur
             if (data.error && data.error.includes('déjà')) {
                 showResult(`Le mot "${guess}" a déjà été essayé !`, 'warning');
             } else {
@@ -588,11 +831,20 @@ async function loadArticleContent() {
         // Préparer les données de proximité des dernières tentatives
         const proximityData = guessHistory
             .filter(guess => !guess.found && guess.proximity > 0)
-            .slice(0, 5) // Garder seulement les 5 dernières tentatives avec proximité
+            .slice(0, 10) // Augmenter de 5 à 10 pour garder plus d'historique
             .map(guess => ({
                 word: guess.word,
                 proximity: guess.proximity
             }));
+
+        // Ajouter aussi les mots avec proximité stockés localement
+        const storedProximities = JSON.parse(localStorage.getItem(`proximities_${roomCode}`) || '[]');
+        storedProximities.forEach(stored => {
+            // Éviter les doublons
+            if (!proximityData.find(p => p.word === stored.word)) {
+                proximityData.push(stored);
+            }
+        });
 
         console.log('Données de proximité:', proximityData);
 
@@ -615,6 +867,11 @@ async function loadArticleContent() {
 
         if (data.content) {
             document.getElementById('articleContent').innerHTML = data.content;
+
+            // Mettre à jour la progression du titre si disponible
+            if (data.title_progress) {
+                updateTitleProgress(data.title_progress);
+            }
 
             // Ajouter les event listeners pour les mots cachés après mise à jour du contenu
             addHiddenWordClickListeners();
@@ -698,7 +955,7 @@ function getProximityClass(proximity) {
 }
 
 function revealAllWords() {
-    // Révéler tous les mots de l'article
+    // R��véler tous les mots de l'article
     document.querySelectorAll('.hidden-word').forEach(word => {
         word.classList.remove('hidden-word');
         word.classList.add('title-word'); // Style spécial pour la victoire
@@ -827,6 +1084,33 @@ function copyRoomCode() {
         document.body.removeChild(textArea);
         showResult('Code de salle copié !', 'success');
     });
+}
+
+// Fonction pour mettre à jour l'affichage de la progression du titre
+function updateTitleProgress(titleProgress) {
+    if (!titleProgress) return;
+
+    const progressSection = document.getElementById('titleProgressSection');
+    const progressDisplay = document.getElementById('titleProgress');
+    const progressInfo = document.getElementById('titleProgressInfo');
+
+    if (progressSection && progressDisplay && progressInfo) {
+        // Afficher la section de progression du titre
+        progressSection.style.display = 'block';
+
+        // Mettre à jour l'affichage du titre avec les mots trouvés/manquants
+        progressDisplay.textContent = titleProgress.display_title;
+
+        // Mettre à jour les informations de progression
+        progressInfo.textContent = `${titleProgress.found_words}/${titleProgress.total_words} mots trouvés (${titleProgress.progress_percentage}%)`;
+
+        // Ajouter une animation si le titre est complet
+        if (titleProgress.is_complete) {
+            progressDisplay.style.color = '#28a745';
+            progressDisplay.style.fontWeight = 'bold';
+            progressDisplay.style.textShadow = '0 0 10px rgba(40, 167, 69, 0.5)';
+        }
+    }
 }
 
 async function loadGameData() {

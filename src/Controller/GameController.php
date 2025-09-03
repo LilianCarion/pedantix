@@ -169,6 +169,8 @@ class GameController extends AbstractController
             $foundWords = [];
             $gameCompleted = false;
             $proximityData = [];
+            $gameSession = null;
+            $titleProgress = null;
 
             if ($sessionId) {
                 $gameSession = $this->pedantixService->getGameSession($sessionId);
@@ -184,6 +186,9 @@ class GameController extends AbstractController
                             $proximityData = $decoded;
                         }
                     }
+
+                    // Récupérer les informations de progression du titre
+                    $titleProgress = $this->pedantixService->getTitleProgress($gameSession, $room);
                 }
             }
 
@@ -193,7 +198,8 @@ class GameController extends AbstractController
                 'title' => $room->getTitle(),
                 'content' => $processedContent,
                 'total_words' => count($room->getWordsToFind()),
-                'game_completed' => $gameCompleted
+                'game_completed' => $gameCompleted,
+                'title_progress' => $titleProgress
             ]);
         } catch (\Exception $e) {
             // Log l'erreur pour debugging
@@ -243,6 +249,200 @@ class GameController extends AbstractController
                 'leaderboard' => $leaderboardData,
                 'active_players' => $activePlayersData
             ]);
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    #[Route('/api/random-article', name: 'app_random_article', methods: ['GET'])]
+    public function getRandomArticle(Request $request): JsonResponse
+    {
+        try {
+            // Debug : vérifier si le service est bien injecté
+            if (!$this->pedantixService) {
+                return $this->json(['error' => 'Service PedantixService non disponible'], 500);
+            }
+
+            $difficulty = $request->query->get('difficulty');
+
+            // Debug : tester directement le repository
+            $randomArticle = $this->pedantixService->getRandomArticle($difficulty);
+
+            if (!$randomArticle) {
+                return $this->json([
+                    'success' => false,
+                    'error' => 'Aucun article disponible',
+                    'debug' => 'Repository returned null'
+                ], 404);
+            }
+
+            return $this->json([
+                'success' => true,
+                'article' => [
+                    'title' => $randomArticle->getTitle(),
+                    'url' => $randomArticle->getUrl(),
+                    'difficulty' => $randomArticle->getDifficulty(),
+                    'category' => $randomArticle->getCategory()
+                ]
+            ]);
+        } catch (\Exception $e) {
+            // Log détaillé de l'erreur
+            error_log('Erreur dans getRandomArticle: ' . $e->getMessage() . ' - File: ' . $e->getFile() . ' - Line: ' . $e->getLine());
+            error_log('Stack trace: ' . $e->getTraceAsString());
+
+            return $this->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'debug' => [
+                    'file' => basename($e->getFile()),
+                    'line' => $e->getLine(),
+                    'trace' => $e->getTraceAsString()
+                ]
+            ], 500);
+        }
+    }
+
+    #[Route('/game/{roomCode}/recap', name: 'app_game_recap')]
+    public function gameRecap(string $roomCode): Response
+    {
+        // Rediriger vers l'accueil au lieu d'afficher les stats
+        return $this->redirectToRoute('app_home');
+    }
+
+    #[Route('/api/game-events/{roomCode}', name: 'app_game_events')]
+    public function getGameEvents(string $roomCode, Request $request): JsonResponse
+    {
+        try {
+            $room = $this->pedantixService->getRoomByCode($roomCode);
+            if (!$room) {
+                return $this->json(['error' => 'Salle introuvable'], 404);
+            }
+
+            $sessionId = $request->query->get('session_id');
+            $lastEventId = $request->query->get('last_event_id', 0);
+
+            // Récupérer les événements récents (nouveaux joueurs qui trouvent le mot, etc.)
+            $events = $this->pedantixService->getGameEvents($room, (int)$lastEventId);
+
+            // Vérifier l'état global du jeu
+            $gameStatus = $this->pedantixService->checkGameStatus($room);
+
+            return $this->json([
+                'events' => $events,
+                'game_status' => $gameStatus,
+                'last_event_id' => $events ? max(array_column($events, 'id')) : $lastEventId
+            ]);
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    #[Route('/api/complete-game/{roomCode}', name: 'app_complete_game', methods: ['POST'])]
+    public function completeGame(string $roomCode, Request $request): JsonResponse
+    {
+        try {
+            $room = $this->pedantixService->getRoomByCode($roomCode);
+            if (!$room) {
+                return $this->json(['error' => 'Salle introuvable'], 404);
+            }
+
+            $data = json_decode($request->getContent(), true);
+            $sessionId = $data['session_id'] ?? null;
+
+            if (!$sessionId) {
+                return $this->json(['error' => 'Session requise'], 400);
+            }
+
+            // Marquer le jeu comme terminé et générer les statistiques finales
+            $result = $this->pedantixService->completeGame($room, $sessionId);
+
+            return $this->json([
+                'success' => true,
+                'game_completed' => true,
+                'winner' => $result['winner'] ?? null,
+                'final_leaderboard' => $result['leaderboard'] ?? [],
+                'redirect_to_recap' => true
+            ]);
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    #[Route('/api/new-game', name: 'app_new_game', methods: ['POST'])]
+    public function newGame(Request $request): JsonResponse
+    {
+        try {
+            $data = json_decode($request->getContent(), true);
+            $currentRoomCode = $data['current_room_code'] ?? '';
+            $sessionId = $data['session_id'] ?? null;
+
+            if (!$sessionId) {
+                return $this->json(['error' => 'Session requise'], 400);
+            }
+
+            // Récupérer la session actuelle
+            $currentSession = $this->pedantixService->getGameSession($sessionId);
+            if (!$currentSession) {
+                return $this->json(['error' => 'Session invalide'], 400);
+            }
+
+            $room = $currentSession->getRoom();
+
+            // Vérifier si une nouvelle partie peut être démarrée
+            if (!$room->canStartNewGame()) {
+                return $this->json([
+                    'error' => 'Une nouvelle partie est déjà en cours de création. Veuillez patienter.',
+                    'locked' => true
+                ], 423);
+            }
+
+            // Acquérir le verrou pour cette session
+            $room->lockForNewGame($sessionId);
+            $this->pedantixService->saveRoom($room);
+
+            // Obtenir un article aléatoire pour la nouvelle partie
+            $randomArticle = $this->pedantixService->getRandomArticle();
+            if (!$randomArticle) {
+                $room->unlockNewGame();
+                $this->pedantixService->saveRoom($room);
+                return $this->json(['error' => 'Aucun article disponible'], 404);
+            }
+
+            // Créer la nouvelle partie dans la même salle
+            $result = $this->pedantixService->startNewGameInSameRoom($room, $randomArticle->getUrl());
+
+            return $this->json([
+                'success' => true,
+                'new_game_number' => $room->getGameNumber(),
+                'new_article_title' => $result['title'],
+                'message' => 'Nouvelle partie démarrée !',
+                'reload_page' => true
+            ]);
+
+        } catch (\Exception $e) {
+            return $this->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    #[Route('/api/room-status/{roomCode}', name: 'app_room_status')]
+    public function getRoomStatus(string $roomCode, Request $request): JsonResponse
+    {
+        try {
+            $room = $this->pedantixService->getRoomByCode($roomCode);
+            if (!$room) {
+                return $this->json(['error' => 'Salle introuvable'], 404);
+            }
+
+            $sessionId = $request->query->get('session_id');
+            $gameSession = null;
+
+            if ($sessionId) {
+                $gameSession = $this->pedantixService->getGameSession($sessionId);
+            }
+
+            $status = $this->pedantixService->getRoomStatus($room, $gameSession);
+
+            return $this->json($status);
         } catch (\Exception $e) {
             return $this->json(['error' => $e->getMessage()], 500);
         }

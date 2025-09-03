@@ -1,0 +1,459 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Pedantix - Récapitulatif de la partie{% endblock %}
+
+{% block stylesheets %}
+<style>
+    .stats-card {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 15px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        transition: all 0.3s ease;
+    }
+
+    .stats-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+    }
+
+    .stats-number {
+        font-size: 2.5rem;
+        font-weight: bold;
+        background: linear-gradient(45deg, #667eea, #764ba2);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .player-card {
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 12px;
+        border-left: 4px solid;
+        transition: all 0.3s ease;
+        margin-bottom: 15px;
+    }
+
+    .player-card:hover {
+        transform: translateX(5px);
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+    }
+
+    .player-card.rank-1 { border-left-color: #ffd700; }
+    .player-card.rank-2 { border-left-color: #c0c0c0; }
+    .player-card.rank-3 { border-left-color: #cd7f32; }
+    .player-card.other { border-left-color: #667eea; }
+
+    .rank-badge {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        color: white;
+        font-size: 1.2rem;
+    }
+
+    .rank-1 .rank-badge { background: linear-gradient(45deg, #ffd700, #ffed4e); }
+    .rank-2 .rank-badge { background: linear-gradient(45deg, #c0c0c0, #e0e0e0); }
+    .rank-3 .rank-badge { background: linear-gradient(45deg, #cd7f32, #ff8c42); }
+    .other .rank-badge { background: linear-gradient(45deg, #667eea, #764ba2); }
+
+    .word-difficulty-item {
+        background: rgba(255, 255, 255, 0.8);
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 8px;
+        border-left: 3px solid;
+        transition: all 0.3s ease;
+    }
+
+    .word-difficulty-item:hover {
+        background: rgba(255, 255, 255, 0.95);
+        transform: translateX(3px);
+    }
+
+    .difficulty-très-facile { border-left-color: #28a745; }
+    .difficulty-facile { border-left-color: #20c997; }
+    .difficulty-moyen { border-left-color: #ffc107; }
+    .difficulty-difficile { border-left-color: #fd7e14; }
+    .difficulty-très-difficile { border-left-color: #dc3545; }
+
+    .crown-icon {
+        color: #ffd700;
+        text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+        animation: glow 2s ease-in-out infinite alternate;
+    }
+
+    @keyframes glow {
+        from { text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
+        to { text-shadow: 0 0 20px rgba(255, 215, 0, 0.8); }
+    }
+
+    .progress-circle {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        background: conic-gradient(from 0deg, #667eea 0%, #667eea var(--progress), #e9ecef var(--progress), #e9ecef 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+
+    .progress-circle::before {
+        content: '';
+        position: absolute;
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: white;
+    }
+
+    .progress-text {
+        position: relative;
+        z-index: 1;
+        font-weight: bold;
+        color: #667eea;
+        font-size: 1.1rem;
+    }
+
+    .confetti-celebration {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1000;
+    }
+
+    .btn-new-game {
+        background: linear-gradient(45deg, #28a745, #20c997);
+        border: none;
+        color: white;
+        font-weight: 600;
+        padding: 15px 30px;
+        border-radius: 50px;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        display: inline-block;
+    }
+
+    .btn-new-game:hover {
+        color: white;
+        transform: translateY(-3px);
+        box-shadow: 0 10px 25px rgba(40, 167, 69, 0.3);
+    }
+
+    .article-info {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 15px;
+        padding: 25px;
+        text-align: center;
+        margin-bottom: 30px;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="confetti-celebration" id="confettiCelebration"></div>
+
+<div class="container-fluid">
+    <!-- En-tête avec informations sur l'article -->
+    <div class="article-info">
+        <h1 class="display-4 mb-3">
+            <i class="fas fa-trophy crown-icon me-3"></i>
+            Récapitulatif de la partie
+        </h1>
+        <h2 class="h3 mb-2">{{ room.title }}</h2>
+        <p class="lead mb-0">
+            <i class="fas fa-users me-2"></i>{{ stats.total_players }} joueur{{ stats.total_players > 1 ? 's' : '' }} -
+            <i class="fas fa-gamepad me-2"></i>Mode {{ room.gameMode == 'cooperation' ? 'Coopération' : 'Compétition' }}
+        </p>
+    </div>
+
+    <!-- Statistiques globales -->
+    <div class="row mb-5">
+        <div class="col-md-3 col-6 mb-4">
+            <div class="stats-card p-4 text-center h-100">
+                <div class="stats-number">{{ stats.total_players }}</div>
+                <p class="text-muted mb-0">Joueurs total</p>
+            </div>
+        </div>
+        <div class="col-md-3 col-6 mb-4">
+            <div class="stats-card p-4 text-center h-100">
+                <div class="stats-number">{{ stats.completed_players }}</div>
+                <p class="text-muted mb-0">Ont terminé</p>
+            </div>
+        </div>
+        <div class="col-md-3 col-6 mb-4">
+            <div class="stats-card p-4 text-center h-100">
+                <div class="progress-circle mx-auto" style="--progress: {{ stats.completion_rate * 3.6 }}deg;">
+                    <div class="progress-text">{{ stats.completion_rate }}%</div>
+                </div>
+                <p class="text-muted mb-0 mt-2">Taux de réussite</p>
+            </div>
+        </div>
+        <div class="col-md-3 col-6 mb-4">
+            <div class="stats-card p-4 text-center h-100">
+                <div class="stats-number">{{ stats.average_attempts|number_format(1) }}</div>
+                <p class="text-muted mb-0">Tentatives moy.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Classement des joueurs -->
+        <div class="col-lg-8 mb-4">
+            <div class="stats-card p-4">
+                <h3 class="mb-4">
+                    <i class="fas fa-medal text-warning me-2"></i>
+                    Classement final
+                </h3>
+
+                {% if stats.player_stats is not empty %}
+                    {% for player in stats.player_stats %}
+                        {% set rank_class = player.rank == 1 ? 'rank-1' : (player.rank == 2 ? 'rank-2' : (player.rank == 3 ? 'rank-3' : 'other')) %}
+                        <div class="player-card {{ rank_class }} p-3">
+                            <div class="row align-items-center">
+                                <div class="col-auto">
+                                    <div class="rank-badge">
+                                        {% if player.rank == 1 %}
+                                            <i class="fas fa-crown"></i>
+                                        {% elseif player.rank == 2 %}
+                                            2
+                                        {% elseif player.rank == 3 %}
+                                            3
+                                        {% else %}
+                                            {{ player.rank }}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="col">
+                                    <h5 class="mb-1">
+                                        {{ player.name }}
+                                        {% if player.rank == 1 %}
+                                            <i class="fas fa-trophy text-warning ms-2"></i>
+                                        {% endif %}
+                                    </h5>
+                                    <div class="row g-0">
+                                        <div class="col-sm-3">
+                                            <small class="text-muted">Score: </small>
+                                            <strong class="text-primary">{{ player.score }}</strong>
+                                        </div>
+                                        <div class="col-sm-3">
+                                            <small class="text-muted">Tentatives: </small>
+                                            <strong>{{ player.attempts }}</strong>
+                                        </div>
+                                        <div class="col-sm-3">
+                                            <small class="text-muted">Mots: </small>
+                                            <strong class="text-success">{{ player.words_found }}</strong>
+                                        </div>
+                                        <div class="col-sm-3">
+                                            {% if player.completed %}
+                                                <small class="text-muted">Terminé: </small>
+                                                <strong class="text-info">{{ player.completion_time }}</strong>
+                                            {% else %}
+                                                <span class="badge bg-secondary">En cours</span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="text-muted text-center">Aucun joueur dans cette partie</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Statistiques et difficulté des mots -->
+        <div class="col-lg-4">
+            <!-- Statistiques additionnelles -->
+            <div class="stats-card p-4 mb-4">
+                <h4 class="mb-3">
+                    <i class="fas fa-chart-line text-info me-2"></i>
+                    Statistiques
+                </h4>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Mots trouvés total:</span>
+                        <strong class="text-success">{{ stats.total_words_found }}</strong>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Record personnel:</span>
+                        <strong class="text-warning">{{ stats.most_words_found }} mots</strong>
+                    </div>
+                </div>
+                {% if stats.fastest_completion %}
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between">
+                            <span>Temps le plus rapide:</span>
+                            <strong class="text-primary">{{ (stats.fastest_completion / 60)|number_format(1) }} min</strong>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Difficulté des mots -->
+            <div class="stats-card p-4">
+                <h4 class="mb-3">
+                    <i class="fas fa-brain text-purple me-2"></i>
+                    Difficulté des mots
+                </h4>
+                <div style="max-height: 300px; overflow-y: auto;">
+                    {% if stats.word_difficulty is not empty %}
+                        {% for word in stats.word_difficulty|slice(0, 10) %}
+                            {% set difficulty_class = 'difficulty-' ~ word.difficulty|replace(' ', '-')|lower %}
+                            <div class="word-difficulty-item {{ difficulty_class }}">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>{{ word.word }}</strong>
+                                        <br>
+                                        <small class="text-muted">{{ word.difficulty }}</small>
+                                    </div>
+                                    <div class="text-end">
+                                        <span class="badge bg-primary">{{ word.found_by }}/{{ stats.total_players }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p class="text-muted text-center">Aucun mot trouvé</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="text-center mt-5 mb-4">
+        <button onclick="startNewGame()" class="btn-new-game me-3">
+            <i class="fas fa-play me-2"></i>
+            Nouvelle partie
+        </button>
+        <a href="/" class="btn btn-outline-primary btn-lg">
+            <i class="fas fa-home me-2"></i>
+            Retour à l'accueil
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Animer les confettis si il y a un gagnant
+    {% if stats.player_stats is not empty and stats.player_stats[0].completed %}
+        createCelebrationConfetti();
+    {% endif %}
+
+    // Animer l'apparition des cartes
+    animateCards();
+});
+
+function createCelebrationConfetti() {
+    const container = document.getElementById('confettiCelebration');
+
+    for (let i = 0; i < 100; i++) {
+        setTimeout(() => {
+            const confetti = document.createElement('div');
+            confetti.style.cssText = `
+                position: absolute;
+                width: 10px;
+                height: 10px;
+                background: hsl(${Math.random() * 360}, 70%, 60%);
+                left: ${Math.random() * 100}%;
+                top: -10px;
+                border-radius: 50%;
+                animation: confetti-fall ${3 + Math.random() * 2}s linear forwards;
+            `;
+
+            container.appendChild(confetti);
+
+            setTimeout(() => confetti.remove(), 6000);
+        }, i * 50);
+    }
+}
+
+function animateCards() {
+    const cards = document.querySelectorAll('.stats-card, .player-card');
+    cards.forEach((card, index) => {
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(20px)';
+
+        setTimeout(() => {
+            card.style.transition = 'all 0.6s ease';
+            card.style.opacity = '1';
+            card.style.transform = 'translateY(0)';
+        }, index * 100);
+    });
+}
+
+async function startNewGame() {
+    try {
+        // Récupérer les informations de session depuis sessionStorage
+        const gameSession = JSON.parse(sessionStorage.getItem('gameSession') || '{}');
+
+        if (!gameSession.sessionId) {
+            alert('Session expirée. Retour à l\'accueil.');
+            window.location.href = '/';
+            return;
+        }
+
+        // Désactiver le bouton pendant la création
+        const button = document.querySelector('button[onclick="startNewGame()"]');
+        const originalText = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Création en cours...';
+
+        // Appeler directement l'API pour créer une nouvelle partie avec un article aléatoire
+        const response = await fetch('/api/new-game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                current_room_code: '{{ room.code }}',
+                session_id: gameSession.sessionId
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Succès : rediriger vers la même salle avec le nouvel article
+            alert(`Nouvelle partie créée ! Article: ${data.new_article_title}`);
+            window.location.href = `/game/{{ room.code }}`;
+        } else {
+            // Erreur
+            alert(`Erreur : ${data.error}`);
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    } catch (error) {
+        console.error('Erreur:', error);
+        alert('Erreur de connexion. Veuillez réessayer.');
+        // Rétablir le bouton
+        const button = document.querySelector('button[onclick="startNewGame()"]');
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-play me-2"></i>Nouvelle partie';
+    }
+}
+</script>
+
+<style>
+@keyframes confetti-fall {
+    to {
+        transform: translateY(100vh) rotate(720deg);
+        opacity: 0;
+    }
+}
+</style>
+{% endblock %}

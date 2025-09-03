@@ -4,8 +4,10 @@ namespace App\Service;
 
 use App\Entity\GameSession;
 use App\Entity\Room;
+use App\Entity\WikipediaArticle;
 use App\Repository\GameSessionRepository;
 use App\Repository\RoomRepository;
+use App\Repository\WikipediaArticleRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 class PedantixService
@@ -13,7 +15,8 @@ class PedantixService
     public function __construct(
         private EntityManagerInterface $entityManager,
         private RoomRepository $roomRepository,
-        private GameSessionRepository $gameSessionRepository
+        private GameSessionRepository $gameSessionRepository,
+        private WikipediaArticleRepository $wikipediaArticleRepository
     ) {}
 
     public function createRoom(string $wikipediaUrl, string $gameMode = 'competition'): Room
@@ -94,33 +97,57 @@ class PedantixService
             'duplicate' => false
         ];
 
-        // Vérifier si c'est le mot-titre (victoire)
+        // Extraire tous les mots significatifs du titre
         $titleWords = $this->extractTitleWords($room->getTitle());
+        $titleWordsNormalized = array_map([$this, 'normalizeWord'], $titleWords);
 
-        foreach ($titleWords as $titleWord) {
-            if ($this->normalizeWord($titleWord) === $normalizedGuess) {
-                $result['found'] = true;
-                $result['isExactMatch'] = true;
+        // Vérifier si le mot deviné correspond à un des mots du titre
+        $isTitleWord = false;
+        foreach ($titleWordsNormalized as $titleWord) {
+            if ($titleWord === $normalizedGuess) {
+                $isTitleWord = true;
+                break;
+            }
+        }
+
+        if ($isTitleWord) {
+            $result['found'] = true;
+            $result['isExactMatch'] = true;
+            $gameSession->addFoundWord($guess);
+
+            // En mode coopératif, ajouter le mot à la liste globale de la salle
+            if ($room->isCooperativeMode()) {
+                $room->addGlobalFoundWord($guess);
+                $this->roomRepository->save($room, true);
+            }
+
+            // Vérifier si TOUS les mots du titre ont été trouvés
+            $allTitleWordsFound = $this->checkAllTitleWordsFound($gameSession, $room, $titleWordsNormalized);
+
+            if ($allTitleWordsFound) {
                 $result['gameCompleted'] = true;
-                $gameSession->addFoundWord($guess);
                 $gameSession->setCompleted(true);
 
-                // En mode coopératif, ajouter le mot à la liste globale de la salle
+                // En mode coopération, marquer le jeu comme terminé pour tous
                 if ($room->isCooperativeMode()) {
-                    $room->addGlobalFoundWord($guess);
+                    $room->setIsGameCompleted(true);
+                    $room->setCompletedAt(new \DateTimeImmutable());
+
+                    // En coopération, tous les joueurs actifs deviennent "gagnants"
+                    $this->markAllPlayersAsWinners($room);
                     $this->roomRepository->save($room, true);
                 }
 
                 // Score final basé sur le nombre de tentatives (moins = mieux)
                 $finalScore = max(1000 - ($gameSession->getAttempts() * 10), 100);
                 $gameSession->setScore($finalScore);
-
-                $this->gameSessionRepository->save($gameSession, true);
-                return $result;
             }
+
+            $this->gameSessionRepository->save($gameSession, true);
+            return $result;
         }
 
-        // Vérifier si le mot existe dans l'article
+        // Vérifier si le mot existe dans l'article (mais n'est pas un mot du titre)
         if ($this->wordExistsInArticle($guess, $content)) {
             $result['found'] = true;
             $gameSession->addFoundWord($guess);
@@ -141,6 +168,37 @@ class PedantixService
 
         $this->gameSessionRepository->save($gameSession, true);
         return $result;
+    }
+
+    /**
+     * Vérifie si tous les mots du titre ont été trouvés par le joueur
+     */
+    private function checkAllTitleWordsFound(GameSession $gameSession, Room $room, array $titleWordsNormalized): bool
+    {
+        // En mode coopération, vérifier les mots trouvés globalement
+        if ($room->isCooperativeMode()) {
+            $allFoundWords = array_unique(array_merge($gameSession->getFoundWords(), $room->getGlobalFoundWords()));
+        } else {
+            $allFoundWords = $gameSession->getFoundWords();
+        }
+
+        $foundWordsNormalized = array_map([$this, 'normalizeWord'], $allFoundWords);
+
+        // Vérifier que chaque mot du titre a été trouvé
+        foreach ($titleWordsNormalized as $titleWord) {
+            $found = false;
+            foreach ($foundWordsNormalized as $foundWord) {
+                if ($foundWord === $titleWord) {
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                return false; // Il manque encore au moins un mot
+            }
+        }
+
+        return true; // Tous les mots du titre ont été trouvés
     }
 
     public function getProcessedContent(Room $room, array $foundWords, array $proximityData = [], bool $gameCompleted = false): string
@@ -1036,29 +1094,89 @@ class PedantixService
             $guessedWord = $proximityInfo['word'];
             $proximityScore = $proximityInfo['proximity'];
 
-            // Trouver le meilleur mot de l'article pour afficher ce mot deviné
-            $bestMatch = null;
-            $bestSimilarity = 0;
+            // Ignorer les proximités trop faibles
+            if ($proximityScore < 100) {
+                continue;
+            }
 
+            // Pour chaque mot de l'article, vérifier la compatibilité avec le mot deviné
             foreach ($allContentWords as $contentWord) {
                 $normalizedContentWord = $this->normalizeWord($contentWord);
                 $normalizedGuessedWord = $this->normalizeWord($guessedWord);
 
-                // Calculer la similarité entre le mot deviné et le mot de l'article
-                $similarity = $this->calculateLevenshteinSimilarity($normalizedGuessedWord, $normalizedContentWord);
+                $shouldMap = false;
+                $similarity = 0;
 
-                if ($similarity > $bestSimilarity && $similarity > 0.3) {
-                    $bestSimilarity = $similarity;
-                    $bestMatch = $normalizedContentWord;
+                // 1. Vérifier si les deux sont des nombres
+                if ($this->isNumber($guessedWord) && $this->isNumber($contentWord)) {
+                    $numberProximity = $this->calculateNumberProximity($guessedWord, $contentWord);
+                    if ($numberProximity > 0) {
+                        $shouldMap = true;
+                        $similarity = $numberProximity / 1000; // Normaliser pour comparaison
+                    }
                 }
-            }
+                // 2. Vérifier si les deux sont des dates
+                elseif ($this->isDate($guessedWord) && $this->isDate($contentWord)) {
+                    $dateProximity = $this->calculateDateProximity($guessedWord, $contentWord);
+                    if ($dateProximity > 0) {
+                        $shouldMap = true;
+                        $similarity = $dateProximity / 1000; // Normaliser pour comparaison
+                    }
+                }
+                // 3. Vérifier la similarité textuelle pour les mots normaux
+                else {
+                    $textSimilarity = $this->calculateLevenshteinSimilarity($normalizedGuessedWord, $normalizedContentWord);
+                    // Réduire le seuil de similarité pour garder plus de suggestions
+                    if ($textSimilarity > 0.2) {
+                        $shouldMap = true;
+                        $similarity = $textSimilarity;
+                    }
 
-            // Si on a trouvé un match suffisamment bon, l'ajouter au mapping
-            if ($bestMatch !== null) {
-                $mapping[$bestMatch] = [
-                    'guessed_word' => $guessedWord,
-                    'proximity' => $proximityScore
-                ];
+                    // Vérifier aussi la proximité sémantique
+                    $semanticScore = $this->calculateSemanticSimilarity($normalizedGuessedWord, $normalizedContentWord);
+                    if ($semanticScore > 600) {
+                        $shouldMap = true;
+                        $similarity = max($similarity, $semanticScore / 1000);
+                    }
+
+                    // Vérifier les sous-chaînes pour maintenir les suggestions
+                    if (strlen($normalizedGuessedWord) >= 3 && strlen($normalizedContentWord) >= 3) {
+                        if (strpos($normalizedGuessedWord, $normalizedContentWord) !== false ||
+                            strpos($normalizedContentWord, $normalizedGuessedWord) !== false) {
+                            $shouldMap = true;
+                            $similarity = max($similarity, 0.6);
+                        }
+                    }
+                }
+
+                // Si ce mot doit être mappé
+                if ($shouldMap) {
+                    $currentScore = $proximityScore * $similarity; // Score combiné
+
+                    // CHANGEMENT IMPORTANT: Au lieu de remplacer, garder la meilleure suggestion
+                    // mais aussi permettre plusieurs suggestions pour le même mot si elles sont bonnes
+                    if (!isset($mapping[$normalizedContentWord])) {
+                        $mapping[$normalizedContentWord] = [
+                            'guessed_word' => $guessedWord,
+                            'proximity' => $proximityScore,
+                            'similarity' => $similarity,
+                            'combined_score' => $currentScore
+                        ];
+                    } else {
+                        // Si le nouveau mapping a un score significativement meilleur (>20% d'amélioration)
+                        // OU si c'est une proximité très élevée (>800), alors on remplace
+                        $existingScore = $mapping[$normalizedContentWord]['combined_score'];
+                        if ($currentScore > $existingScore * 1.2 || $proximityScore > 800) {
+                            $mapping[$normalizedContentWord] = [
+                                'guessed_word' => $guessedWord,
+                                'proximity' => $proximityScore,
+                                'similarity' => $similarity,
+                                'combined_score' => $currentScore
+                            ];
+                        }
+                        // Sinon, on garde l'ancien mapping pour éviter que les suggestions disparaissent
+                    }
+                }
             }
         }
 
@@ -1095,7 +1213,8 @@ class PedantixService
                 $semanticScore = $this->calculateSemanticSimilarity($normalizedFoundWord, $normalizedContentWord);
 
                 // Si il y a une proximité sémantique significative
-                if ($semanticScore >= 700) { // Seuil élevé pour l'affichage sémantique
+                if ($semanticScore >= 700) // Seuil élevé pour l'affichage sémantique
+                {
                     // Seulement si ce mot n'a pas déjà un mapping avec un score plus élevé
                     if (!isset($mapping[$normalizedContentWord]) || $mapping[$normalizedContentWord]['proximity'] < $semanticScore) {
                         $mapping[$normalizedContentWord] = [
@@ -1110,27 +1229,459 @@ class PedantixService
         return $mapping;
     }
 
+    /**
+     * Récupère un article Wikipedia aléatoire
+     */
+    public function getRandomArticle(?string $difficulty = null): ?WikipediaArticle
+    {
+        return $this->wikipediaArticleRepository->findRandomArticle($difficulty);
+    }
+
+
+    /**
+     * Récupère les événements de jeu en temps réel (nouvelles victoires, etc.)
+     */
+    public function getGameEvents(Room $room, int $lastEventId): array
+    {
+        // Récupérer les événements récents (joueurs qui ont trouvé le mot, nouvelles victoires, etc.)
+        $events = [];
+
+        // Vérifier les sessions qui ont été complétées récemment
+        $recentCompletions = $this->gameSessionRepository->getRecentCompletions($room, $lastEventId);
+
+        foreach ($recentCompletions as $session) {
+            $events[] = [
+                'id' => $session->getId() + 1000, // Offset pour éviter les conflits
+                'type' => 'player_won',
+                'player_name' => $session->getPlayerName(),
+                'score' => $session->getScore(),
+                'attempts' => $session->getAttempts(),
+                'completed_at' => $session->getCompletedAt()->format('Y-m-d H:i:s'),
+                'position' => $this->getPlayerPosition($room, $session),
+                'message' => $this->generateVictoryMessage($session, $room)
+            ];
+        }
+
+        return $events;
+    }
+
+    public function checkGameStatus(Room $room): array
+    {
+        $activePlayers = $this->getActivePlayers($room);
+        $completedPlayers = $this->gameSessionRepository->getCompletedSessions($room);
+
+        $totalPlayers = count($activePlayers);
+        $completedCount = count($completedPlayers);
+
+        // En mode compétition, vérifier si tous les joueurs ont terminé
+        if ($room->getGameMode() === 'competition') {
+            $allCompleted = $totalPlayers > 0 && $completedCount >= $totalPlayers;
+
+            if ($allCompleted && !$room->isGameCompleted()) {
+                // Marquer le jeu comme terminé
+                $room->setIsGameCompleted(true);
+                $room->setCompletedAt(new \DateTimeImmutable());
+
+                // Définir le gagnant (meilleur score)
+                $winner = $this->gameSessionRepository->getWinner($room);
+                if ($winner) {
+                    $room->setWinnerId($winner->getId());
+                }
+
+                $this->roomRepository->save($room, true);
+            }
+
+            // Récupérer les informations du gagnant correctement formatées
+            $winnerData = null;
+            if ($room->getWinnerId()) {
+                $winner = $this->getGameSession($room->getWinnerId());
+                if ($winner) {
+                    $winnerData = [
+                        'player_name' => $winner->getPlayerName(),
+                        'score' => $winner->getScore(),
+                        'attempts' => $winner->getAttempts()
+                    ];
+                }
+            }
+
+            return [
+                'is_completed' => $allCompleted,
+                'total_players' => $totalPlayers,
+                'completed_players' => $completedCount,
+                'winner' => $winnerData,
+                'game_mode' => 'competition'
+            ];
+        }
+        // En mode coopération, vérifier si le jeu est terminé (titre trouvé)
+        elseif ($room->getGameMode() === 'cooperation') {
+            $isCompleted = $room->isGameCompleted();
+
+            // Récupérer les informations de l'équipe gagnante
+            $teamData = null;
+            if ($isCompleted) {
+                $allCompletedPlayers = $this->gameSessionRepository->getCompletedSessions($room);
+                if (!empty($allCompletedPlayers)) {
+                    // En coopération, tous les joueurs sont gagnants
+                    $teamData = array_map(function($session) {
+                        return [
+                            'player_name' => $session->getPlayerName(),
+                            'score' => $session->getScore(),
+                            'attempts' => $session->getAttempts()
+                        ];
+                    }, $allCompletedPlayers);
+                }
+            }
+
+            return [
+                'is_completed' => $isCompleted,
+                'total_players' => $totalPlayers,
+                'completed_players' => $completedCount,
+                'team' => $teamData, // En coopération, on parle d'équipe plutôt que de gagnant individuel
+                'game_mode' => 'cooperation'
+            ];
+        }
+
+        return [
+            'is_completed' => false,
+            'total_players' => $totalPlayers,
+            'completed_players' => $completedCount,
+            'game_mode' => $room->getGameMode()
+        ];
+    }
+
+    public function completeGame(Room $room, int $sessionId): array
+    {
+        // Marquer manuellement le jeu comme terminé
+        $room->setIsGameCompleted(true);
+        $room->setCompletedAt(new \DateTimeImmutable());
+
+        // Définir le gagnant si pas encore fait
+        if (!$room->getWinnerId()) {
+            $winner = $this->gameSessionRepository->getWinner($room);
+            if ($winner) {
+                $room->setWinnerId($winner->getId());
+            }
+        }
+
+        $this->roomRepository->save($room, true);
+
+        // Retourner les statistiques finales
+        $leaderboard = $this->getLeaderboard($room);
+        $winner = $room->getWinnerId() ? $this->getGameSession($room->getWinnerId()) : null;
+
+        return [
+            'winner' => $winner ? [
+                'player_name' => $winner->getPlayerName(),
+                'score' => $winner->getScore(),
+                'attempts' => $winner->getAttempts()
+            ] : null,
+            'leaderboard' => array_map(function($session) {
+                return [
+                    'player_name' => $session->getPlayerName(),
+                    'score' => $session->getScore(),
+                    'attempts' => $session->getAttempts(),
+                    'completed_at' => $session->getCompletedAt()?->format('Y-m-d H:i:s')
+                ];
+            }, $leaderboard)
+        ];
+    }
+
+    public function transferPlayersToNewRoom(string $oldRoomCode, Room $newRoom): array
+    {
+        $oldRoom = $this->getRoomByCode($oldRoomCode);
+        if (!$oldRoom) {
+            throw new \Exception('Ancienne salle introuvable');
+        }
+
+        $activePlayers = $this->getActivePlayers($oldRoom);
+        $transferredPlayers = [];
+
+        foreach ($activePlayers as $oldSession) {
+            // Créer une nouvelle session dans la nouvelle salle
+            $newSession = new GameSession();
+            $newSession->setRoom($newRoom);
+            $newSession->setPlayerName($oldSession->getPlayerName());
+            $newSession->setIpAddress($oldSession->getIpAddress());
+
+            $this->gameSessionRepository->save($newSession, true);
+
+            $transferredPlayers[] = [
+                'player_name' => $newSession->getPlayerName(),
+                'new_session_id' => $newSession->getId()
+            ];
+        }
+
+        return [
+            'transferred_players' => $transferredPlayers,
+            'count' => count($transferredPlayers)
+        ];
+    }
+
+    public function getRoomStatus(Room $room, ?GameSession $gameSession): array
+    {
+        $activePlayers = $this->getActivePlayers($room);
+        $completedPlayers = $this->gameSessionRepository->getCompletedSessions($room);
+
+        $status = [
+            'room_code' => $room->getCode(),
+            'game_mode' => $room->getGameMode(),
+            'is_game_completed' => $room->isGameCompleted(),
+            'total_players' => count($activePlayers),
+            'completed_players' => count($completedPlayers),
+            'winner' => null
+        ];
+
+        if ($room->getWinnerId()) {
+            $winner = $this->getGameSession($room->getWinnerId());
+            if ($winner) {
+                $status['winner'] = [
+                    'player_name' => $winner->getPlayerName(),
+                    'score' => $winner->getScore(),
+                    'attempts' => $winner->getAttempts()
+                ];
+            }
+        }
+
+        if ($gameSession) {
+            $status['current_player'] = [
+                'name' => $gameSession->getPlayerName(),
+                'score' => $gameSession->getScore(),
+                'attempts' => $gameSession->getAttempts(),
+                'completed' => $gameSession->isCompleted(),
+                'position' => $this->getPlayerPosition($room, $gameSession)
+            ];
+        }
+
+        return $status;
+    }
+
+    /**
+     * Démarre une nouvelle partie dans la même salle avec un nouvel article
+     */
+    public function startNewGameInSameRoom(Room $room, string $wikipediaUrl): array
+    {
+        try {
+            // Récupérer les données du nouvel article
+            $articleData = $this->fetchWikipediaArticle($wikipediaUrl);
+
+            // Sauvegarder les scores précédents avant de réinitialiser
+            $this->archivePreviousGameScores($room);
+
+            // Réinitialiser la salle pour la nouvelle partie
+            $room->resetForNewGame(
+                $articleData['title'],
+                $articleData['content'],
+                $wikipediaUrl,
+                $articleData['allWords']
+            );
+
+            // Réinitialiser toutes les sessions de jeu pour la nouvelle partie
+            $this->resetAllGameSessions($room);
+
+            // Sauvegarder les changements
+            $this->roomRepository->save($room, true);
+
+            return [
+                'title' => $articleData['title'],
+                'game_number' => $room->getGameNumber()
+            ];
+
+        } catch (\Exception $e) {
+            // En cas d'erreur, déverrouiller la salle
+            $room->unlockNewGame();
+            $this->roomRepository->save($room, true);
+            throw $e;
+        }
+    }
+
+    /**
+     * Archive les scores de la partie précédente
+     */
+    private function archivePreviousGameScores(Room $room): void
+    {
+        // Pour l'instant, on garde simplement les scores cumulatifs
+        // Dans une version future, on pourrait créer une table d'historique des parties
+        $activeSessions = $this->gameSessionRepository->findActiveSessionsForRoom($room);
+
+        foreach ($activeSessions as $session) {
+            // Marquer la session comme archivée pour cette partie
+            // Les scores seront conservés et s'additionneront à la prochaine partie
+        }
+    }
+
+    /**
+     * Réinitialise toutes les sessions de jeu pour une nouvelle partie
+     */
+    private function resetAllGameSessions(Room $room): void
+    {
+        $activeSessions = $this->gameSessionRepository->findActiveSessionsForRoom($room);
+
+        foreach ($activeSessions as $session) {
+            // Réinitialiser les données spécifiques à la partie mais garder le score cumulé
+            $currentScore = $session->getScore(); // Score cumulé de toutes les parties
+
+            $session->setFoundWords([]);
+            $session->setAttempts(0);
+            $session->setCompleted(false);
+            $session->setCompletedAt(null);
+            $session->updateActivity();
+            // Le score reste inchangé pour être cumulatif
+
+            $this->gameSessionRepository->save($session, false);
+        }
+
+        // Flush tous les changements en une fois
+        $this->entityManager->flush();
+    }
+
+    /**
+     * Sauvegarde une salle
+     */
+    public function saveRoom(Room $room): void
+    {
+        $this->roomRepository->save($room, true);
+    }
+
+    /**
+     * Calcule la difficulté d'un mot basé sur le nombre de joueurs qui l'ont trouvé
+     */
+    private function calculateWordDifficulty(string $word, int $foundByCount, int $totalPlayers): string
+    {
+        $percentage = $totalPlayers > 0 ? ($foundByCount / $totalPlayers) * 100 : 0;
+
+        if ($percentage >= 80) {
+            return 'Très facile';
+        } elseif ($percentage >= 60) {
+            return 'Facile';
+        } elseif ($percentage >= 40) {
+            return 'Moyen';
+        } elseif ($percentage >= 20) {
+            return 'Difficile';
+        } else {
+            return 'Très difficile';
+        }
+    }
+
+    /**
+     * Retourne le style CSS pour la couleur de proximité
+     */
     private function getProximityColorStyle(int $proximityScore): string
     {
-        // Nouveau système : fond grisé avec texte coloré
-        // Jaune très clair = très proche, orange foncé = éloigné
-        $baseStyle = 'background: #d0d0d0 !important; padding: 1px 2px !important; border-radius: 3px !important;';
-
-        if ($proximityScore >= 900) {
-            // Très chaud - texte jaune très clair (proche)
-            return $baseStyle . ' color: #FFFF99 !important; font-weight: bold !important;';
-        } elseif ($proximityScore >= 700) {
-            // Chaud - texte jaune doré
-            return $baseStyle . ' color: #FFD700 !important; font-weight: bold !important;';
-        } elseif ($proximityScore >= 500) {
-            // Tiède - texte orange clair
-            return $baseStyle . ' color: #FFB347 !important;';
-        } elseif ($proximityScore >= 300) {
-            // Froid - texte orange
-            return $baseStyle . ' color: #FF8C00 !important;';
+        if ($proximityScore >= 800) {
+            return 'background: #d0d0d0 !important; color: #FFD700 !important; font-weight: bold !important;'; // Très chaud - doré
+        } elseif ($proximityScore >= 600) {
+            return 'background: #d0d0d0 !important; color: #FF8C00 !important; font-weight: bold !important;'; // Chaud - orange
+        } elseif ($proximityScore >= 400) {
+            return 'background: #d0d0d0 !important; color: #FF6347 !important;'; // Tiède - rouge tomate
         } else {
-            // Très froid - texte orange foncé (éloigné)
-            return $baseStyle . ' color: #CC5500 !important;';
+            return 'background: #d0d0d0 !important; color: #696969 !important;'; // Froid - gris foncé
         }
+    }
+
+    /**
+     * Obtient la position d'un joueur dans le classement
+     */
+    private function getPlayerPosition(Room $room, GameSession $session): int
+    {
+        $leaderboard = $this->getLeaderboard($room);
+
+        foreach ($leaderboard as $index => $leaderSession) {
+            if ($leaderSession->getId() === $session->getId()) {
+                return $index + 1;
+            }
+        }
+
+        return count($leaderboard) + 1; // Si pas trouvé, mettre à la fin
+    }
+
+    /**
+     * Génère un message de victoire personnalisé
+     */
+    private function generateVictoryMessage(GameSession $session, Room $room): string
+    {
+        $position = $this->getPlayerPosition($room, $session);
+        $playerName = $session->getPlayerName();
+
+        if ($position === 1) {
+            return "🏆 {$playerName} remporte la victoire !";
+        } elseif ($position <= 3) {
+            return "🥉 {$playerName} termine sur le podium (#{$position}) !";
+        } else {
+            return "✅ {$playerName} a trouvé le mot-titre !";
+        }
+    }
+
+    /**
+     * Récupère les informations de progression du titre (mots trouvés/total)
+     */
+    public function getTitleProgress(GameSession $gameSession, Room $room): array
+    {
+        $titleWords = $this->extractTitleWords($room->getTitle());
+        $titleWordsNormalized = array_map([$this, 'normalizeWord'], $titleWords);
+
+        // En mode coopération, vérifier les mots trouvés globalement
+        if ($room->isCooperativeMode()) {
+            $allFoundWords = array_unique(array_merge($gameSession->getFoundWords(), $room->getGlobalFoundWords()));
+        } else {
+            $allFoundWords = $gameSession->getFoundWords();
+        }
+
+        $foundWordsNormalized = array_map([$this, 'normalizeWord'], $allFoundWords);
+
+        $displayWords = [];
+        $foundCount = 0;
+
+        foreach ($titleWords as $index => $titleWord) {
+            $normalizedTitleWord = $titleWordsNormalized[$index];
+            $isFound = false;
+
+            foreach ($foundWordsNormalized as $foundWord) {
+                if ($foundWord === $normalizedTitleWord) {
+                    $isFound = true;
+                    break;
+                }
+            }
+
+            if ($isFound) {
+                $displayWords[] = $titleWord; // Afficher le mot trouvé
+                $foundCount++;
+            } else {
+                // Afficher des traits selon la longueur du mot
+                $displayWords[] = str_repeat('_', mb_strlen($titleWord));
+            }
+        }
+
+        return [
+            'title' => $room->getTitle(),
+            'total_words' => count($titleWords),
+            'found_words' => $foundCount,
+            'display_title' => implode(' ', $displayWords),
+            'is_complete' => $foundCount === count($titleWords),
+            'progress_percentage' => count($titleWords) > 0 ? round(($foundCount / count($titleWords)) * 100) : 0
+        ];
+    }
+
+    /**
+     * Marque tous les joueurs actifs comme gagnants en mode coopération
+     */
+    private function markAllPlayersAsWinners(Room $room): void
+    {
+        $activePlayers = $this->getActivePlayers($room);
+
+        foreach ($activePlayers as $session) {
+            if (!$session->isCompleted()) {
+                $session->setCompleted(true);
+                $session->setCompletedAt(new \DateTimeImmutable());
+
+                // Attribuer un score de participation pour tous les joueurs
+                $participationScore = max(500 - ($session->getAttempts() * 5), 100);
+                $session->setScore($session->getScore() + $participationScore);
+
+                $this->gameSessionRepository->save($session, false);
+            }
+        }
+
+        // Flush tous les changements en une fois
+        $this->entityManager->flush();
     }
 }
