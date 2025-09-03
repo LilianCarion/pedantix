@@ -33,6 +33,9 @@ class Room
     #[ORM\Column]
     private ?bool $isActive = true;
 
+    #[ORM\Column(length: 20)]
+    private ?string $gameMode = 'competition';
+
     #[ORM\OneToMany(targetEntity: GameSession::class, mappedBy: 'room')]
     private Collection $gameSessions;
 
@@ -41,6 +44,9 @@ class Room
 
     #[ORM\Column(type: 'json')]
     private array $hints = [];
+
+    #[ORM\Column(type: 'json')]
+    private array $globalFoundWords = [];
 
     public function __construct()
     {
@@ -168,6 +174,46 @@ class Room
     public function setHints(array $hints): static
     {
         $this->hints = $hints;
+        return $this;
+    }
+
+    public function getGameMode(): ?string
+    {
+        return $this->gameMode;
+    }
+
+    public function setGameMode(string $gameMode): static
+    {
+        $this->gameMode = $gameMode;
+        return $this;
+    }
+
+    public function isCooperativeMode(): bool
+    {
+        return $this->gameMode === 'cooperation';
+    }
+
+    public function isCompetitiveMode(): bool
+    {
+        return $this->gameMode === 'competition';
+    }
+
+    public function getGlobalFoundWords(): array
+    {
+        return $this->globalFoundWords;
+    }
+
+    public function setGlobalFoundWords(array $globalFoundWords): static
+    {
+        $this->globalFoundWords = $globalFoundWords;
+        return $this;
+    }
+
+    public function addGlobalFoundWord(string $word): static
+    {
+        if (!in_array($word, $this->globalFoundWords)) {
+            $this->globalFoundWords[] = $word;
+        }
         return $this;
     }
 

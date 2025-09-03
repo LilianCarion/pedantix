@@ -33,6 +33,35 @@
                                    placeholder="https://fr.wikipedia.org/wiki/..." required>
                             <div class="form-text">Collez l'URL d'un article Wikipedia français</div>
                         </div>
+
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">Mode de jeu :</label>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-body text-center">
+                                            <input type="radio" class="form-check-input" id="competitionMode" name="gameMode" value="competition" checked>
+                                            <label for="competitionMode" class="form-check-label">
+                                                <h5 class="card-title mt-2">🏆 Compétition</h5>
+                                                <p class="card-text small">Chaque joueur trouve ses propres mots. Le premier à trouver le mot-titre gagne !</p>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card h-100">
+                                        <div class="card-body text-center">
+                                            <input type="radio" class="form-check-input" id="cooperationMode" name="gameMode" value="cooperation">
+                                            <label for="cooperationMode" class="form-check-label">
+                                                <h5 class="card-title mt-2">🤝 Coopération</h5>
+                                                <p class="card-text small">Tous les mots trouvés par les joueurs apparaissent pour tout le monde. Travaillez ensemble !</p>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <button type="submit" class="btn btn-primary btn-lg">
                             <i class="fas fa-rocket me-2"></i>Créer la salle
                         </button>
@@ -110,6 +139,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const formData = new FormData(e.target);
         const wikipediaUrl = formData.get('wikipediaUrl') || document.getElementById('wikipediaUrl').value;
+        const gameMode = formData.get('gameMode') || 'competition';
 
         if (!wikipediaUrl) {
             showAlert('Veuillez entrer une URL Wikipedia valide.', 'danger');
@@ -125,14 +155,16 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    wikipedia_url: wikipediaUrl
+                    wikipedia_url: wikipediaUrl,
+                    game_mode: gameMode
                 })
             });
 
             const data = await response.json();
 
             if (data.success) {
-                showAlert(`Salle créée avec succès ! Code: <strong>${data.room_code}</strong><br>Article: ${data.title}`, 'success');
+                const modeText = data.game_mode === 'cooperation' ? ' (Mode Coopération)' : ' (Mode Compétition)';
+                showAlert(`Salle créée avec succès ! Code: <strong>${data.room_code}</strong><br>Article: ${data.title}${modeText}`, 'success');
                 setTimeout(() => {
                     window.location.href = `/game/${data.room_code}`;
                 }, 2000);

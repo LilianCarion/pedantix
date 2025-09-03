@@ -16,7 +16,7 @@ class PedantixService
         private GameSessionRepository $gameSessionRepository
     ) {}
 
-    public function createRoom(string $wikipediaUrl): Room
+    public function createRoom(string $wikipediaUrl, string $gameMode = 'competition'): Room
     {
         $articleData = $this->fetchWikipediaArticle($wikipediaUrl);
 
@@ -26,6 +26,7 @@ class PedantixService
         $room->setUrl($wikipediaUrl);
         $room->setWordsToFind($articleData['allWords']);
         $room->setHints([]); // Pas d'indices dans le vrai Pedantix
+        $room->setGameMode($gameMode);
 
         $this->roomRepository->save($room, true);
 
@@ -104,6 +105,12 @@ class PedantixService
                 $gameSession->addFoundWord($guess);
                 $gameSession->setCompleted(true);
 
+                // En mode coopératif, ajouter le mot à la liste globale de la salle
+                if ($room->isCooperativeMode()) {
+                    $room->addGlobalFoundWord($guess);
+                    $this->roomRepository->save($room, true);
+                }
+
                 // Score final basé sur le nombre de tentatives (moins = mieux)
                 $finalScore = max(1000 - ($gameSession->getAttempts() * 10), 100);
                 $gameSession->setScore($finalScore);
@@ -117,6 +124,12 @@ class PedantixService
         if ($this->wordExistsInArticle($guess, $content)) {
             $result['found'] = true;
             $gameSession->addFoundWord($guess);
+
+            // En mode coopératif, ajouter le mot à la liste globale de la salle
+            if ($room->isCooperativeMode()) {
+                $room->addGlobalFoundWord($guess);
+                $this->roomRepository->save($room, true);
+            }
 
             // Ajouter des points pour chaque mot trouvé (seulement si pas déjà trouvé)
             $currentScore = $gameSession->getScore() + 10;
@@ -133,7 +146,15 @@ class PedantixService
     public function getProcessedContent(Room $room, array $foundWords, array $proximityData = [], bool $gameCompleted = false): string
     {
         $content = $room->getContent();
-        $foundWordsNormalized = array_map([$this, 'normalizeWord'], $foundWords);
+
+        // En mode coopératif, combiner les mots trouvés par le joueur avec ceux trouvés globalement
+        if ($room->isCooperativeMode()) {
+            $allFoundWords = array_unique(array_merge($foundWords, $room->getGlobalFoundWords()));
+        } else {
+            $allFoundWords = $foundWords;
+        }
+
+        $foundWordsNormalized = array_map([$this, 'normalizeWord'], $allFoundWords);
 
         // Si le jeu est terminé, révéler tous les mots
         if ($gameCompleted) {
@@ -158,7 +179,7 @@ class PedantixService
         $wordProximityMapping = $this->buildWordProximityMapping($content, $proximityData);
 
         // Créer un mapping des proximités sémantiques pour les mots trouvés
-        $semanticProximityMapping = $this->buildSemanticProximityMapping($content, $foundWords);
+        $semanticProximityMapping = $this->buildSemanticProximityMapping($content, $allFoundWords);
 
         // Comportement normal : diviser le contenu en mots tout en préservant la ponctuation et la structure
         $words = preg_split('/(\s+|[.,;:!?()"\'-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
@@ -286,7 +307,7 @@ class PedantixService
 
             if ($summaryResponse === false) {
                 $error = error_get_last();
-                throw new \Exception('Impossible de récupérer l\'article Wikipedia: ' . ($error['message'] ?? 'Erreur de connexion'));
+                throw new \Exception('Impossible de r��cupérer l\'article Wikipedia: ' . ($error['message'] ?? 'Erreur de connexion'));
             }
 
             $summaryData = json_decode($summaryResponse, true);

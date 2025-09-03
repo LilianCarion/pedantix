@@ -26,9 +26,15 @@ class GameController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
         $wikipediaUrl = $data['wikipedia_url'] ?? '';
+        $gameMode = $data['game_mode'] ?? 'competition'; // Par défaut: compétition
 
         if (empty($wikipediaUrl)) {
             return $this->json(['success' => false, 'error' => 'URL Wikipedia requise'], 400);
+        }
+
+        // Valider le mode de jeu
+        if (!in_array($gameMode, ['competition', 'cooperation'])) {
+            return $this->json(['success' => false, 'error' => 'Mode de jeu invalide'], 400);
         }
 
         // Valider le format de l'URL Wikipedia
@@ -37,12 +43,13 @@ class GameController extends AbstractController
         }
 
         try {
-            $room = $this->pedantixService->createRoom($wikipediaUrl);
+            $room = $this->pedantixService->createRoom($wikipediaUrl, $gameMode);
 
             return $this->json([
                 'success' => true,
                 'room_code' => $room->getCode(),
-                'title' => $room->getTitle()
+                'title' => $room->getTitle(),
+                'game_mode' => $room->getGameMode()
             ]);
         } catch (\Exception $e) {
             // Log l'erreur pour debugging
