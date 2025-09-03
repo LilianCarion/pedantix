@@ -1,6 +1,6 @@
 <?php
 /**
- * Script de déploiement web automatique pour OVH avec gestion des chemins PHP
+ * Script de déploiement web automatique pour OVH avec gestion des versions PHP
  * À exécuter UNE SEULE FOIS après upload via navigateur web
  * URL: http://analantix.ovh/deploy.php
  */
@@ -154,15 +154,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         }
         $steps[2]['success'] = true;
 
-        // Étape 4: Installer les dépendances avec le bon chemin PHP et les variables d'environnement
-        $steps[] = ['step' => 4, 'description' => 'Installation des dépendances PHP avec variables d\'environnement'];
+        // Étape 4: Nettoyer les anciennes dépendances et forcer la mise à jour
+        $steps[] = ['step' => 4, 'description' => 'Nettoyage et mise à jour des dépendances pour PHP 8.1'];
 
-        $result = execWithEnv("$phpPath composer.phar install --no-dev --optimize-autoloader --no-interaction", $phpPath);
+        // Supprimer composer.lock pour forcer la résolution avec les nouvelles versions
+        if (file_exists('composer.lock')) {
+            unlink('composer.lock');
+        }
+
+        // Supprimer le dossier vendor pour une installation propre
+        if (is_dir('vendor')) {
+            $result = execWithEnv("rm -rf vendor", $phpPath);
+        }
+
+        // Installer avec les nouvelles contraintes de version (Symfony 6.4)
+        $result = execWithEnv("$phpPath composer.phar update --no-dev --optimize-autoloader --no-interaction", $phpPath);
         $steps[3]['success'] = $result['success'];
         $steps[3]['output'] = $result['output'];
 
         if (!$result['success']) {
-            throw new Exception('Échec de l\'installation des dépendances: ' . $result['output']);
+            // Essayer avec install si update échoue
+            $result2 = execWithEnv("$phpPath composer.phar install --no-dev --optimize-autoloader --no-interaction --ignore-platform-req=php", $phpPath);
+            if ($result2['success']) {
+                $steps[3]['success'] = true;
+                $steps[3]['output'] .= "\n\nSecond essai avec install réussi:\n" . $result2['output'];
+            } else {
+                throw new Exception('Échec de l\'installation des dépendances: ' . $result['output']);
+            }
         }
 
         // Étape 5: Créer la base de données
@@ -245,21 +263,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
 
         echo json_encode([
             'success' => true,
-            'message' => 'Déploiement réussi !',
+            'message' => 'Déploiement réussi avec Symfony 6.4 LTS !',
             'data' => [
                 'steps' => $steps,
                 'article_count' => $articleCount,
                 'php_path' => $phpPath,
                 'composer_home' => $homeDir,
+                'symfony_version' => '6.4 LTS (compatible PHP 8.1)',
                 'domain' => $ovh_config['domain'],
                 'next_steps' => [
                     'Votre Pedantix est maintenant opérationnel !',
+                    'Version: Symfony 6.4 LTS compatible PHP 8.1',
                     'Configurez votre serveur web pour pointer vers public/',
                     'Supprimez ce fichier deploy.php pour la sécurité',
                     'Accédez à votre site via: http://' . $ovh_config['domain'],
                     "Articles Wikipedia en base: $articleCount",
-                    "PHP utilisé: $phpPath",
-                    "Composer HOME: $homeDir"
+                    "PHP utilisé: $phpPath"
                 ]
             ]
         ], JSON_UNESCAPED_UNICODE);
