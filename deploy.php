@@ -45,6 +45,47 @@ function findPhpPath() {
     return 'php'; // Fallback
 }
 
+// Configurer les variables d'environnement pour Composer
+function setupComposerEnvironment() {
+    $homeDir = getcwd() . '/composer_home';
+
+    // Créer le répertoire home pour Composer s'il n'existe pas
+    if (!is_dir($homeDir)) {
+        mkdir($homeDir, 0755, true);
+    }
+
+    // Définir les variables d'environnement
+    putenv("HOME=$homeDir");
+    putenv("COMPOSER_HOME=$homeDir");
+    putenv("COMPOSER_CACHE_DIR=$homeDir/cache");
+
+    return $homeDir;
+}
+
+// Exécuter une commande avec les bonnes variables d'environnement
+function execWithEnv($command, $phpPath) {
+    $homeDir = getcwd() . '/composer_home';
+
+    // Construire la commande avec les variables d'environnement
+    $envVars = [
+        "HOME=$homeDir",
+        "COMPOSER_HOME=$homeDir",
+        "COMPOSER_CACHE_DIR=$homeDir/cache"
+    ];
+
+    $fullCommand = implode(' ', $envVars) . ' ' . $command;
+
+    $output = [];
+    $returnCode = 0;
+    exec($fullCommand . ' 2>&1', $output, $returnCode);
+
+    return [
+        'success' => $returnCode === 0,
+        'output' => implode("\n", $output),
+        'return_code' => $returnCode
+    ];
+}
+
 // Vérifier que nous sommes bien sur le serveur
 $isLocal = in_array($_SERVER['HTTP_HOST'], ['localhost', '127.0.0.1']) ||
            strpos($_SERVER['HTTP_HOST'], 'localhost:') === 0;
@@ -61,11 +102,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
     $allSuccess = true;
 
     try {
+        // Configurer l'environnement Composer
+        $homeDir = setupComposerEnvironment();
+
         // Détecter le chemin PHP
         $phpPath = findPhpPath();
 
         // Étape 1: Vérification de l'environnement
-        $steps[] = ['step' => 1, 'description' => 'Détection de l\'environnement PHP'];
+        $steps[] = ['step' => 1, 'description' => 'Détection de l\'environnement PHP et configuration Composer'];
 
         $output = [];
         $returnCode = 0;
@@ -77,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
 
         $phpVersion = implode("\n", $output);
         $steps[0]['success'] = true;
-        $steps[0]['output'] = "PHP détecté: $phpPath\n$phpVersion";
+        $steps[0]['output'] = "PHP détecté: $phpPath\n$phpVersion\nComposer HOME: $homeDir";
 
         // Étape 2: Créer le fichier .env automatiquement
         $steps[] = ['step' => 2, 'description' => 'Configuration automatique .env'];
@@ -110,66 +154,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         }
         $steps[2]['success'] = true;
 
-        // Étape 4: Installer les dépendances avec le bon chemin PHP
-        $steps[] = ['step' => 4, 'description' => 'Installation des dépendances PHP'];
+        // Étape 4: Installer les dépendances avec le bon chemin PHP et les variables d'environnement
+        $steps[] = ['step' => 4, 'description' => 'Installation des dépendances PHP avec variables d\'environnement'];
 
-        $output = [];
-        $returnCode = 0;
-        exec("$phpPath composer.phar install --no-dev --optimize-autoloader --no-interaction 2>&1", $output, $returnCode);
-        $steps[3]['success'] = $returnCode === 0;
-        $steps[3]['output'] = implode("\n", $output);
+        $result = execWithEnv("$phpPath composer.phar install --no-dev --optimize-autoloader --no-interaction", $phpPath);
+        $steps[3]['success'] = $result['success'];
+        $steps[3]['output'] = $result['output'];
 
-        if (!$steps[3]['success']) {
-            throw new Exception('Échec de l\'installation des dépendances');
+        if (!$result['success']) {
+            throw new Exception('Échec de l\'installation des dépendances: ' . $result['output']);
         }
 
         // Étape 5: Créer la base de données
         $steps[] = ['step' => 5, 'description' => 'Configuration de la base de données'];
 
-        $output = [];
-        $returnCode = 0;
-        exec("$phpPath bin/console doctrine:database:create --if-not-exists --no-interaction 2>&1", $output, $returnCode);
-        $steps[4]['success'] = $returnCode === 0;
-        $steps[4]['output'] = implode("\n", $output);
+        $result = execWithEnv("$phpPath bin/console doctrine:database:create --if-not-exists --no-interaction", $phpPath);
+        $steps[4]['success'] = $result['success'];
+        $steps[4]['output'] = $result['output'];
 
         // Continuer même si la base existe déjà
 
         // Étape 6: Exécuter les migrations
         $steps[] = ['step' => 6, 'description' => 'Exécution des migrations'];
 
-        $output = [];
-        $returnCode = 0;
-        exec("$phpPath bin/console doctrine:migrations:migrate --no-interaction 2>&1", $output, $returnCode);
-        $steps[5]['success'] = $returnCode === 0;
-        $steps[5]['output'] = implode("\n", $output);
+        $result = execWithEnv("$phpPath bin/console doctrine:migrations:migrate --no-interaction", $phpPath);
+        $steps[5]['success'] = $result['success'];
+        $steps[5]['output'] = $result['output'];
 
-        if (!$steps[5]['success']) {
-            throw new Exception('Échec des migrations');
+        if (!$result['success']) {
+            throw new Exception('Échec des migrations: ' . $result['output']);
         }
 
         // Étape 7: Nettoyer le cache
         $steps[] = ['step' => 7, 'description' => 'Nettoyage du cache'];
 
-        $output = [];
-        $returnCode = 0;
-        exec("$phpPath bin/console cache:clear --env=prod --no-debug 2>&1", $output, $returnCode);
-        $steps[6]['success'] = $returnCode === 0;
-        $steps[6]['output'] = implode("\n", $output);
+        $result = execWithEnv("$phpPath bin/console cache:clear --env=prod --no-debug", $phpPath);
+        $steps[6]['success'] = $result['success'];
+        $steps[6]['output'] = $result['output'];
 
-        if (!$steps[6]['success']) {
-            throw new Exception('Échec du nettoyage du cache');
+        if (!$result['success']) {
+            throw new Exception('Échec du nettoyage du cache: ' . $result['output']);
         }
 
         // Étape 8: Peupler avec les articles Wikipedia
         $steps[] = ['step' => 8, 'description' => 'Peuplement des articles Wikipedia'];
 
-        $output = [];
-        $returnCode = 0;
-        exec("$phpPath bin/console app:seed-wikipedia-articles 2>&1", $output, $returnCode);
-        $steps[7]['success'] = $returnCode === 0;
-        $steps[7]['output'] = implode("\n", $output);
+        $result = execWithEnv("$phpPath bin/console app:seed-wikipedia-articles", $phpPath);
+        $steps[7]['success'] = $result['success'];
+        $steps[7]['output'] = $result['output'];
 
-        if (!$steps[7]['success']) {
+        if (!$result['success']) {
             // Continuer même si ça échoue, les articles peuvent être ajoutés manuellement
             $steps[7]['warning'] = 'Articles non chargés automatiquement - ils seront ajoutés lors de la première utilisation';
         }
@@ -189,28 +223,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         // Étape 10: Test final
         $steps[] = ['step' => 10, 'description' => 'Test de l\'installation'];
 
-        $output = [];
-        $returnCode = 0;
-        exec("$phpPath bin/console debug:container --env=prod 2>&1", $output, $returnCode);
-        $steps[9]['success'] = $returnCode === 0;
-        $steps[9]['output'] = implode("\n", $output);
+        $result = execWithEnv("$phpPath bin/console debug:container --env=prod", $phpPath);
+        $steps[9]['success'] = $result['success'];
+        $steps[9]['output'] = $result['output'];
 
-        if (!$steps[9]['success']) {
-            throw new Exception('Test final échoué');
+        if (!$result['success']) {
+            throw new Exception('Test final échoué: ' . $result['output']);
         }
 
         // Compter les articles en base
         $articleCount = 0;
         try {
-            $output = [];
-            exec("$phpPath bin/console doctrine:query:sql 'SELECT COUNT(*) as count FROM wikipedia_article' --quiet 2>&1", $output, $returnCode);
-            if ($returnCode === 0 && !empty($output)) {
-                foreach ($output as $line) {
-                    if (preg_match('/(\d+)/', $line, $matches)) {
-                        $articleCount = (int)$matches[1];
-                        break;
-                    }
-                }
+            $result = execWithEnv("$phpPath bin/console doctrine:query:sql 'SELECT COUNT(*) as count FROM wikipedia_article' --quiet", $phpPath);
+            if ($result['success'] && !empty($result['output'])) {
+                preg_match('/(\d+)/', $result['output'], $matches);
+                $articleCount = isset($matches[1]) ? (int)$matches[1] : 0;
             }
         } catch (Exception $e) {
             // Ignorer les erreurs de comptage
@@ -223,6 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
                 'steps' => $steps,
                 'article_count' => $articleCount,
                 'php_path' => $phpPath,
+                'composer_home' => $homeDir,
                 'domain' => $ovh_config['domain'],
                 'next_steps' => [
                     'Votre Pedantix est maintenant opérationnel !',
@@ -230,7 +258,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
                     'Supprimez ce fichier deploy.php pour la sécurité',
                     'Accédez à votre site via: http://' . $ovh_config['domain'],
                     "Articles Wikipedia en base: $articleCount",
-                    "PHP utilisé: $phpPath"
+                    "PHP utilisé: $phpPath",
+                    "Composer HOME: $homeDir"
                 ]
             ]
         ], JSON_UNESCAPED_UNICODE);
@@ -239,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         echo json_encode([
             'success' => false,
             'message' => 'Erreur lors du déploiement: ' . $e->getMessage(),
-            'data' => ['steps' => $steps, 'php_path' => $phpPath ?? 'non détecté']
+            'data' => ['steps' => $steps, 'php_path' => $phpPath ?? 'non détecté', 'composer_home' => $homeDir ?? 'non configuré']
         ], JSON_UNESCAPED_UNICODE);
     }
     exit;
