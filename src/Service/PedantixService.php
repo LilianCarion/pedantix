@@ -156,7 +156,7 @@ class PedantixService
 
         $foundWordsNormalized = array_map([$this, 'normalizeWord'], $allFoundWords);
 
-        // Si le jeu est terminé, révéler tous les mots
+        // Si le jeu est terminé, révéler tous les mots normalement (pas en jaune)
         if ($gameCompleted) {
             // Diviser le contenu en mots tout en préservant la ponctuation et la structure
             $words = preg_split('/(\s+|[.,;:!?()"\'-])/', $content, -1, PREG_SPLIT_DELIM_CAPTURE);
@@ -167,8 +167,8 @@ class PedantixService
                     // Espaces et ponctuation - garder tel quel
                     $processedWords[] = $word;
                 } else {
-                    // Tous les mots sont révélés avec le style de victoire
-                    $processedWords[] = '<span class="title-word">' . htmlspecialchars($word) . '</span>';
+                    // Tous les mots sont révélés avec un style normal (plus de jaune)
+                    $processedWords[] = '<span class="revealed-word-victory">' . htmlspecialchars($word) . '</span>';
                 }
             }
 
