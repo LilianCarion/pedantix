@@ -167,6 +167,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
             $result = execWithEnv("rm -rf vendor", $phpPath);
         }
 
+        // Vérifier et corriger la configuration CSRF si nécessaire
+        $csrfFile = 'config/packages/csrf.yaml';
+        if (file_exists($csrfFile)) {
+            $csrfContent = file_get_contents($csrfFile);
+            // Corriger la configuration CSRF pour Symfony 6.4
+            if (strpos($csrfContent, 'token_id') !== false || strpos($csrfContent, 'stateless_token_ids') !== false) {
+                $newCsrfContent = "framework:\n    csrf_protection:\n        enabled: true\n";
+                file_put_contents($csrfFile, $newCsrfContent);
+            }
+        }
+
         // Installer avec les nouvelles contraintes de version (Symfony 6.4)
         $result = execWithEnv("$phpPath composer.phar update --no-dev --optimize-autoloader --no-interaction", $phpPath);
         $steps[3]['success'] = $result['success'];
