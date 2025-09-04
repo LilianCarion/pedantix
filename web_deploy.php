@@ -1,4 +1,15 @@
 <?php
+// Forcer l'interprétation PHP et éviter la mise en cache
+header('Content-Type: text/html; charset=UTF-8');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+// Vérifier que PHP fonctionne
+if (!function_exists('phpversion')) {
+    die('PHP non disponible sur ce serveur');
+}
+
 /**
  * Interface de déploiement web pour Pedantix
  * À utiliser quand SSH n'est pas disponible sur le serveur OVH
