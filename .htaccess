@@ -1,0 +1,16 @@
+# Configuration .htaccess pour Pedantix sur OVH - Récupération d'urgence
+
+# Redirection vers le dossier public si pas déjà dedans
+RewriteEngine On
+RewriteCond %{REQUEST_URI} !^/public/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ /public/$1 [L]
+
+# Configuration PHP pour OVH
+php_value memory_limit 256M
+php_value max_execution_time 60
+
+# Gestion des erreurs PHP
+php_flag display_errors On
+php_flag log_errors On
