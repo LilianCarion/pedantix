@@ -694,265 +694,13 @@ class PedantixService
         ];
     }
 
-    private function calculateSemanticSimilarity(string $word1, string $word2): int
-    {
-        // Système de proximité sémantique équilibré comme Pedantix
-
-        // 1. Vérifier les synonymes directs (score élevé)
-        $synonyms = $this->getSynonyms();
-        if (isset($synonyms[$word1]) && in_array($word2, $synonyms[$word1])) {
-            return 950;
-        }
-        if (isset($synonyms[$word2]) && in_array($word1, $synonyms[$word2])) {
-            return 950;
-        }
-
-        // 2. Vérifier les groupes sémantiques proches
-        $semanticGroups = $this->getSemanticGroups();
-        $group1 = null;
-        $group2 = null;
-
-        // Trouver les groupes des mots
-        foreach ($semanticGroups as $groupName => $words) {
-            if (in_array($word1, $words)) {
-                $group1 = $groupName;
-            }
-            if (in_array($word2, $words)) {
-                $group2 = $groupName;
-            }
-        }
-
-        // 3. Même groupe sémantique = proximité élevée
-        if ($group1 && $group2 && $group1 === $group2) {
-            return $this->getGroupProximityScore($group1, $word1, $word2);
-        }
-
-        // 4. Groupes liés = proximité moyenne
-        $relatedGroups = $this->getRelatedSemanticGroups();
-        if ($group1 && $group2 && isset($relatedGroups[$group1]) && in_array($group2, $relatedGroups[$group1])) {
-            return rand(400, 600); // Proximité variable pour les groupes liés
-        }
-
-        // 5. Vérifier les relations morphologiques (préfixes, suffixes)
-        $morphological = $this->calculateMorphologicalSimilarity($word1, $word2);
-        if ($morphological > 0) {
-            return $morphological;
-        }
-
-        // 6. Vérifier les relations contextuelles spécifiques
-        $contextual = $this->getContextualProximity($word1, $word2);
-        if ($contextual > 0) {
-            return $contextual;
-        }
-
-        return 0;
-    }
-
-    /**
-     * Calcule le score de proximité pour des mots du même groupe
-     */
-    private function getGroupProximityScore(string $group, string $word1, string $word2): int
-    {
-        // Scores différents selon le type de groupe
-        $groupScores = [
-            'animaux_domestiques' => rand(800, 900),
-            'animaux_sauvages' => rand(750, 850),
-            'couleurs' => rand(700, 800),
-            'corps_humain' => rand(750, 900),
-            'geographie_france' => rand(600, 800),
-            'science_physique' => rand(650, 850),
-            'science_chimie' => rand(700, 900),
-            'technologie' => rand(600, 750),
-            'alimentation' => rand(650, 800),
-            'transport' => rand(600, 750),
-            'batiments' => rand(650, 800),
-            'emotions' => rand(700, 850),
-            'temps_meteo' => rand(600, 800),
-            'materiaux' => rand(650, 800),
-            'professions' => rand(600, 750),
-            'sports' => rand(650, 800),
-            'arts' => rand(600, 750),
-            'plantes' => rand(700, 850),
-            'eau_liquides' => rand(800, 950), // Très liés
-            'feu_chaleur' => rand(750, 900)
-        ];
-
-        return $groupScores[$group] ?? rand(600, 800);
-    }
-
-    /**
-     * Calcule la similarité morphologique (préfixes, suffixes, racines)
-     */
-    private function calculateMorphologicalSimilarity(string $word1, string $word2): int
-    {
-        // Éviter les mots trop courts
-        if (strlen($word1) < 4 || strlen($word2) < 4) {
-            return 0;
-        }
-
-        // Préfixes communs
-        $prefixes = ['anti', 'auto', 'bio', 'co', 'de', 'dis', 'ex', 'hyper', 'inter', 'mega', 'micro', 'mini', 'multi', 'neo', 'post', 'pre', 'pro', 'pseudo', 're', 'semi', 'sub', 'super', 'trans', 'ultra', 'uni'];
-
-        foreach ($prefixes as $prefix) {
-            if (str_starts_with($word1, $prefix) && str_starts_with($word2, $prefix)) {
-                $suffix1 = substr($word1, strlen($prefix));
-                $suffix2 = substr($word2, strlen($prefix));
-                if (strlen($suffix1) >= 3 && strlen($suffix2) >= 3) {
-                    $similarity = $this->calculateStringSimilarity($suffix1, $suffix2);
-                    if ($similarity > 0.6) {
-                        return (int)(300 + $similarity * 300); // 300-600
-                    }
-                }
-            }
-        }
-
-        // Suffixes communs
-        $suffixes = ['tion', 'sion', 'ment', 'able', 'ible', 'ique', 'aire', 'oire', 'eur', 'euse', 'age', 'isme', 'iste', 'ité', 'ité', 'ance', 'ence'];
-
-        foreach ($suffixes as $suffix) {
-            if (str_ends_with($word1, $suffix) && str_ends_with($word2, $suffix)) {
-                $root1 = substr($word1, 0, -strlen($suffix));
-                $root2 = substr($word2, 0, -strlen($suffix));
-                if (strlen($root1) >= 3 && strlen($root2) >= 3) {
-                    $similarity = $this->calculateStringSimilarity($root1, $root2);
-                    if ($similarity > 0.5) {
-                        return (int)(250 + $similarity * 350); // 250-600
-                    }
-                }
-            }
-        }
-
-        // Similarité générale de chaîne pour des mots très similaires
-        $similarity = $this->calculateStringSimilarity($word1, $word2);
-        if ($similarity > 0.8) {
-            return (int)(400 + $similarity * 300); // 400-700 pour des mots très similaires
-        }
-
-        return 0;
-    }
-
-    /**
-     * Calcule la similarité entre deux chaînes (algorithme de Jaro-Winkler simplifié)
-     */
-    private function calculateStringSimilarity(string $str1, string $str2): float
-    {
-        $len1 = strlen($str1);
-        $len2 = strlen($str2);
-
-        if ($len1 === 0 || $len2 === 0) {
-            return 0.0;
-        }
-
-        if ($str1 === $str2) {
-            return 1.0;
-        }
-
-        // Calcul de distance de Levenshtein normalisée
-        $distance = levenshtein($str1, $str2);
-        $maxLen = max($len1, $len2);
-
-        return 1 - ($distance / $maxLen);
-    }
-
-    /**
-     * Relations contextuelles spécifiques (comme dans Pedantix)
-     */
-    private function getContextualProximity(string $word1, string $word2): int
-    {
-        $contextualPairs = [
-            // Relations cause-effet
-            'feu' => ['chaleur' => 800, 'fumee' => 750, 'cendre' => 700, 'brulure' => 650],
-            'eau' => ['humidite' => 750, 'vapeur' => 800, 'glace' => 850, 'liquide' => 900],
-            'soleil' => ['chaleur' => 700, 'lumiere' => 850, 'jour' => 650, 'ete' => 600],
-            'pluie' => ['eau' => 800, 'nuage' => 750, 'humidite' => 700, 'parapluie' => 600],
-
-            // Relations spatiales
-            'mer' => ['plage' => 700, 'vague' => 800, 'poisson' => 650, 'sel' => 600],
-            'montagne' => ['sommet' => 750, 'vallee' => 700, 'neige' => 600, 'rocher' => 650],
-            'foret' => ['arbre' => 850, 'bois' => 800, 'feuille' => 700, 'animal' => 550],
-
-            // Relations fonctionnelles
-            'voiture' => ['roue' => 700, 'moteur' => 750, 'essence' => 650, 'route' => 600],
-            'maison' => ['toit' => 700, 'porte' => 650, 'fenetre' => 650, 'mur' => 700],
-            'ordinateur' => ['ecran' => 700, 'clavier' => 650, 'souris' => 600, 'internet' => 550],
-
-            // Relations temporelles
-            'jour' => ['nuit' => 600, 'matin' => 650, 'soir' => 650, 'soleil' => 700],
-            'hiver' => ['neige' => 800, 'froid' => 850, 'ete' => 500, 'glace' => 750],
-
-            // Relations biologiques
-            'coeur' => ['sang' => 900, 'circulation' => 850, 'artere' => 800, 'battement' => 750],
-            'poumon' => ['respiration' => 900, 'air' => 800, 'oxygene' => 850, 'souffle' => 700],
-            'cerveau' => ['pensee' => 800, 'neurone' => 850, 'intelligence' => 750, 'memoire' => 800],
-        ];
-
-        // Vérifier dans les deux sens
-        if (isset($contextualPairs[$word1][$word2])) {
-            return $contextualPairs[$word1][$word2];
-        }
-        if (isset($contextualPairs[$word2][$word1])) {
-            return $contextualPairs[$word2][$word1];
-        }
-
-        return 0;
-    }
-
-    private function getSemanticGroups(): array
-    {
-        // Groupes sémantiques équilibrés comme Pedantix
-        return [
-            'animaux_domestiques' => ['chat', 'chien', 'cheval', 'vache', 'poule', 'cochon', 'mouton', 'chevre', 'lapin', 'canard'],
-            'animaux_sauvages' => ['lion', 'tigre', 'elephant', 'singe', 'ours', 'loup', 'renard', 'cerf', 'sanglier', 'aigle'],
-            'couleurs' => ['rouge', 'bleu', 'vert', 'jaune', 'noir', 'blanc', 'orange', 'violet', 'rose', 'gris', 'marron'],
-            'corps_humain' => ['tete', 'corps', 'bras', 'jambe', 'main', 'pied', 'oeil', 'bouche', 'nez', 'oreille', 'coeur', 'poumon', 'cerveau', 'sang'],
-            'geographie_france' => ['paris', 'lyon', 'marseille', 'toulouse', 'nice', 'nantes', 'strasbourg', 'montpellier', 'bordeaux', 'lille'],
-            'science_physique' => ['energie', 'force', 'vitesse', 'masse', 'temperature', 'pression', 'lumiere', 'son', 'electricite', 'magnetisme'],
-            'science_chimie' => ['eau', 'oxygene', 'hydrogene', 'carbone', 'azote', 'molecule', 'atome', 'acide', 'base', 'reaction'],
-            'technologie' => ['ordinateur', 'internet', 'telephone', 'television', 'radio', 'logiciel', 'programme', 'donnee', 'reseau', 'systeme'],
-            'alimentation' => ['pain', 'lait', 'fromage', 'viande', 'legume', 'fruit', 'eau', 'vin', 'biere', 'sucre', 'sel'],
-            'transport' => ['voiture', 'train', 'avion', 'bateau', 'velo', 'moto', 'bus', 'metro', 'camion', 'taxi'],
-            'batiments' => ['maison', 'ecole', 'hopital', 'eglise', 'musee', 'theatre', 'cinema', 'restaurant', 'hotel', 'magasin'],
-            'emotions' => ['joie', 'tristesse', 'colere', 'peur', 'amour', 'haine', 'surprise', 'degout', 'fierte', 'honte'],
-            'temps_meteo' => ['soleil', 'pluie', 'neige', 'vent', 'nuage', 'orage', 'brouillard', 'chaleur', 'froid', 'tempete'],
-            'materiaux' => ['bois', 'metal', 'plastique', 'verre', 'pierre', 'tissu', 'papier', 'cuir', 'ceramique', 'caoutchouc'],
-            'professions' => ['medecin', 'professeur', 'avocat', 'ingenieur', 'agriculteur', 'artiste', 'musicien', 'cuisinier', 'vendeur', 'ouvrier'],
-            'sports' => ['football', 'tennis', 'natation', 'course', 'cyclisme', 'basketball', 'volleyball', 'rugby', 'golf', 'ski'],
-            'arts' => ['peinture', 'musique', 'theatre', 'danse', 'sculpture', 'litterature', 'cinema', 'photographie', 'dessin', 'poesie'],
-            'plantes' => ['arbre', 'fleur', 'herbe', 'feuille', 'racine', 'tige', 'graine', 'fruit', 'legume', 'foret'],
-            'eau_liquides' => ['eau', 'mer', 'ocean', 'riviere', 'lac', 'pluie', 'neige', 'glace', 'vapeur', 'humidite'],
-            'feu_chaleur' => ['feu', 'flamme', 'chaleur', 'chaud', 'brulure', 'incendie', 'fumee', 'cendre', 'temperature', 'soleil']
-        ];
-    }
-
-    private function getRelatedSemanticGroups(): array
-    {
-        // Groupes liés entre eux (proximité moyenne)
-        return [
-            'animaux_domestiques' => ['animaux_sauvages', 'alimentation'],
-            'animaux_sauvages' => ['animaux_domestiques', 'plantes'],
-            'science_physique' => ['science_chimie', 'technologie'],
-            'science_chimie' => ['science_physique', 'materiaux'],
-            'corps_humain' => ['emotions', 'alimentation'],
-            'alimentation' => ['corps_humain', 'plantes', 'animaux_domestiques'],
-            'transport' => ['technologie', 'materiaux'],
-            'batiments' => ['materiaux', 'geographie_france'],
-            'temps_meteo' => ['eau_liquides', 'feu_chaleur'],
-            'eau_liquides' => ['temps_meteo', 'science_chimie'],
-            'feu_chaleur' => ['temps_meteo', 'science_physique'],
-            'plantes' => ['alimentation', 'animaux_sauvages', 'eau_liquides'],
-            'arts' => ['emotions', 'couleurs'],
-            'sports' => ['corps_humain', 'emotions'],
-            'professions' => ['batiments', 'technologie']
-        ];
-    }
-
     /**
      * Dictionnaire de synonymes étendu mais pertinent
      */
     private function getSynonyms(): array
     {
         return [
-            // Synonymes directs (score très élevé)
+            // Synonymes directs (score très élev��)
             'eau' => ['h2o', 'flotte'],
             'h2o' => ['eau'],
             'ocean' => ['mer'],
@@ -1239,18 +987,309 @@ class PedantixService
         return $mapping;
     }
 
+    /**
+     * Récupère un article Wikipedia aléatoire
+     */
+    public function getRandomArticle(?string $difficulty = null): ?WikipediaArticle
+    {
+        return $this->wikipediaArticleRepository->findRandomArticle($difficulty);
+    }
 
     /**
-     * Mots vides à ignorer dans l'analyse
+     * Récupère les événements de jeu en temps réel (nouvelles victoires, etc.)
      */
-    private function getStopWords(): array
+    public function getGameEvents(Room $room, int $lastEventId): array
     {
+        // Récupérer les événements récents (joueurs qui ont trouvé le mot, nouvelles victoires, etc.)
+        $events = [];
+
+        // Vérifier les sessions qui ont été complétées récemment
+        $recentCompletions = $this->gameSessionRepository->getRecentCompletions($room, $lastEventId);
+
+        foreach ($recentCompletions as $session) {
+            $events[] = [
+                'id' => $session->getId() + 1000, // Offset pour éviter les conflits
+                'type' => 'player_won',
+                'player_name' => $session->getPlayerName(),
+                'score' => $session->getScore(),
+                'attempts' => $session->getAttempts(),
+                'completed_at' => $session->getCompletedAt()?->format('Y-m-d H:i:s') ?? date('Y-m-d H:i:s'),
+                'position' => $this->getPlayerPosition($room, $session),
+                'message' => $this->generateVictoryMessage($session, $room)
+            ];
+        }
+
+        return $events;
+    }
+
+    public function checkGameStatus(Room $room): array
+    {
+        $activePlayers = $this->getActivePlayers($room);
+        $completedPlayers = $this->gameSessionRepository->getCompletedSessions($room);
+
+        $totalPlayers = count($activePlayers);
+        $completedCount = count($completedPlayers);
+
+        // En mode compétition, vérifier si tous les joueurs ont terminé
+        if ($room->getGameMode() === 'competition') {
+            $allCompleted = $totalPlayers > 0 && $completedCount >= $totalPlayers;
+
+            if ($allCompleted && !$room->isGameCompleted()) {
+                // Marquer le jeu comme terminé
+                $room->setIsGameCompleted(true);
+                $room->setCompletedAt(new \DateTimeImmutable());
+
+                // Définir le gagnant (meilleur score)
+                $winner = $this->gameSessionRepository->getWinner($room);
+                if ($winner) {
+                    $room->setWinnerId($winner->getId());
+                }
+
+                $this->roomRepository->save($room, true);
+            }
+
+            // Récupérer les informations du gagnant correctement formatées
+            $winnerData = null;
+            if ($room->getWinnerId()) {
+                $winner = $this->getGameSession($room->getWinnerId());
+                if ($winner) {
+                    $winnerData = [
+                        'player_name' => $winner->getPlayerName(),
+                        'score' => $winner->getScore(),
+                        'attempts' => $winner->getAttempts()
+                    ];
+                }
+            }
+
+            return [
+                'is_completed' => $allCompleted,
+                'total_players' => $totalPlayers,
+                'completed_players' => $completedCount,
+                'winner' => $winnerData,
+                'game_mode' => 'competition'
+            ];
+        }
+        // En mode coopération, vérifier si le jeu est terminé (titre trouvé)
+        elseif ($room->getGameMode() === 'cooperation') {
+            $isCompleted = $room->isGameCompleted();
+
+            // Récupérer les informations de l'équipe gagnante
+            $teamData = null;
+            if ($isCompleted) {
+                $allCompletedPlayers = $this->gameSessionRepository->getCompletedSessions($room);
+                if (!empty($allCompletedPlayers)) {
+                    // En coopération, tous les joueurs sont gagnants
+                    $teamData = array_map(function($session) {
+                        return [
+                            'player_name' => $session->getPlayerName(),
+                            'score' => $session->getScore(),
+                            'attempts' => $session->getAttempts()
+                        ];
+                    }, $allCompletedPlayers);
+                }
+            }
+
+            return [
+                'is_completed' => $isCompleted,
+                'total_players' => $totalPlayers,
+                'completed_players' => $completedCount,
+                'team' => $teamData, // En coopération, on parle d'équipe plutôt que de gagnant individuel
+                'game_mode' => 'cooperation'
+            ];
+        }
+
         return [
-            'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'est', 'en', 'a', 'il', 'être', 'et', 'à', 'avoir', 'que', 'pour',
-            'dans', 'ce', 'son', 'une', 'sur', 'avec', 'ne', 'se', 'pas', 'tout', 'plus', 'par', 'grand', 'ou', 'si', 'les',
-            'deux', 'très', 'bien', 'où', 'sans', 'peut', 'lui', 'aussi', 'son', 'comme', 'après', 'alors', 'sous', 'était',
-            'avant', 'entre', 'fait', 'lors', 'dont', 'cet', 'donc', 'cette', 'ses', 'soit', 'leur', 'ont', 'peu', 'aux',
-            'nous', 'vous', 'ils', 'elles', 'ces', 'ceux', 'celle', 'celui', 'depuis', 'contre', 'vers', 'chez', 'selon'
+            'is_completed' => false,
+            'total_players' => $totalPlayers,
+            'completed_players' => $completedCount,
+            'game_mode' => $room->getGameMode()
         ];
     }
-}
+
+    public function completeGame(Room $room, int $sessionId): array
+    {
+        // Marquer manuellement le jeu comme terminé
+        $room->setIsGameCompleted(true);
+        $room->setCompletedAt(new \DateTimeImmutable());
+
+        // Définir le gagnant si pas encore fait
+        if (!$room->getWinnerId()) {
+            $winner = $this->gameSessionRepository->getWinner($room);
+            if ($winner) {
+                $room->setWinnerId($winner->getId());
+            }
+        }
+
+        $this->roomRepository->save($room, true);
+
+        // Retourner les statistiques finales
+        $leaderboard = $this->getLeaderboard($room);
+        $winner = $room->getWinnerId() ? $this->getGameSession($room->getWinnerId()) : null;
+
+        return [
+            'winner' => $winner ? [
+                'player_name' => $winner->getPlayerName(),
+                'score' => $winner->getScore(),
+                'attempts' => $winner->getAttempts()
+            ] : null,
+            'leaderboard' => array_map(function($session) {
+                return [
+                    'player_name' => $session->getPlayerName(),
+                    'score' => $session->getScore(),
+                    'attempts' => $session->getAttempts(),
+                    'completed_at' => $session->getCompletedAt()?->format('Y-m-d H:i:s')
+                ];
+            }, $leaderboard)
+        ];
+    }
+
+    public function transferPlayersToNewRoom(string $oldRoomCode, Room $newRoom): array
+    {
+        $oldRoom = $this->getRoomByCode($oldRoomCode);
+        if (!$oldRoom) {
+            throw new \Exception('Ancienne salle introuvable');
+        }
+
+        $activePlayers = $this->getActivePlayers($oldRoom);
+        $transferredPlayers = [];
+
+        foreach ($activePlayers as $oldSession) {
+            // Créer une nouvelle session dans la nouvelle salle
+            $newSession = new GameSession();
+            $newSession->setRoom($newRoom);
+            $newSession->setPlayerName($oldSession->getPlayerName());
+            $newSession->setIpAddress($oldSession->getIpAddress());
+
+            $this->gameSessionRepository->save($newSession, true);
+
+            $transferredPlayers[] = [
+                'player_name' => $newSession->getPlayerName(),
+                'new_session_id' => $newSession->getId()
+            ];
+        }
+
+        return [
+            'transferred_players' => $transferredPlayers,
+            'count' => count($transferredPlayers)
+        ];
+    }
+
+    public function getRoomStatus(Room $room, ?GameSession $gameSession): array
+    {
+        $activePlayers = $this->getActivePlayers($room);
+        $completedPlayers = $this->gameSessionRepository->getCompletedSessions($room);
+
+        $status = [
+            'room_code' => $room->getCode(),
+            'game_mode' => $room->getGameMode(),
+            'is_game_completed' => $room->isGameCompleted(),
+            'total_players' => count($activePlayers),
+            'completed_players' => count($completedPlayers),
+            'winner' => null
+        ];
+
+        if ($room->getWinnerId()) {
+            $winner = $this->getGameSession($room->getWinnerId());
+            if ($winner) {
+                $status['winner'] = [
+                    'player_name' => $winner->getPlayerName(),
+                    'score' => $winner->getScore(),
+                    'attempts' => $winner->getAttempts()
+                ];
+            }
+        }
+
+        if ($gameSession) {
+            $status['current_player'] = [
+                'name' => $gameSession->getPlayerName(),
+                'score' => $gameSession->getScore(),
+                'attempts' => $gameSession->getAttempts(),
+                'completed' => $gameSession->isCompleted(),
+                'position' => $this->getPlayerPosition($room, $gameSession)
+            ];
+        }
+
+        return $status;
+    }
+
+    /**
+     * Démarre une nouvelle partie dans la même salle avec un nouvel article
+     */
+    public function startNewGameInSameRoom(Room $room, string $wikipediaUrl): array
+    {
+        try {
+            // Récupérer les données du nouvel article
+            $articleData = $this->fetchWikipediaArticle($wikipediaUrl);
+
+            // Sauvegarder les scores précédents avant de réinitialiser
+            $this->archivePreviousGameScores($room);
+
+            // Réinitialiser la salle pour la nouvelle partie
+            $room->resetForNewGame(
+                $articleData['title'],
+                $articleData['content'],
+                $wikipediaUrl,
+                $articleData['allWords']
+            );
+
+            // Réinitialiser toutes les sessions de jeu pour la nouvelle partie
+            $this->resetAllGameSessions($room);
+
+            // Sauvegarder les changements
+            $this->roomRepository->save($room, true);
+
+            return [
+                'title' => $articleData['title'],
+                'game_number' => $room->getGameNumber()
+            ];
+
+        } catch (\Exception $e) {
+            // En cas d'erreur, déverrouiller la salle
+            $room->unlockNewGame();
+            $this->roomRepository->save($room, true);
+            throw $e;
+        }
+    }
+
+    /**
+     * Archive les scores de la partie précédente
+     */
+    private function archivePreviousGameScores(Room $room): void
+    {
+        // Pour l'instant, on garde simplement les scores cumulatifs
+        // Dans une version future, on pourrait créer une table d'historique des parties
+        $activeSessions = $this->gameSessionRepository->findActiveSessionsForRoom($room);
+
+        foreach ($activeSessions as $session) {
+            // Marquer la session comme archivée pour cette partie
+            // Les scores seront conservés et s'additionneront à la prochaine partie
+        }
+    }
+
+    /**
+     * Réinitialise toutes les sessions de jeu pour une nouvelle partie
+     */
+    private function resetAllGameSessions(Room $room): void
+    {
+        $activeSessions = $this->gameSessionRepository->findActiveSessionsForRoom($room);
+
+        foreach ($activeSessions as $session) {
+            // Réinitialiser les données spécifiques à la partie mais garder le score cumulé
+            $currentScore = $session->getScore(); // Score cumulé de toutes les parties
+
+            $session->setFoundWords([]);
+            $session->setAttempts(0);
+            $session->setCompleted(false);
+            $session->setCompletedAt(null);
+            $session->updateActivity();
+            // Le score reste inchangé pour être cumulatif
+
+            $this->gameSessionRepository->save($session, false);
+        }
+
+        // Flush tous les changements en une fois
+        $this->entityManager->flush();
+    }
+
+    // ...existing code...
+

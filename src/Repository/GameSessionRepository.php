@@ -68,25 +68,6 @@ class GameSessionRepository extends ServiceEntityRepository
             ->getResult();
     }
 
-    public function getRecentCompletions(Room $room, int $lastEventId): array
-    {
-        // Calculer la vraie valeur de lastEventId en soustrayant l'offset
-        $realLastEventId = max(0, $lastEventId - 1000);
-
-        return $this->createQueryBuilder('gs')
-            ->andWhere('gs.room = :room')
-            ->andWhere('gs.isCompleted = true')
-            ->andWhere('gs.id > :lastEventId')
-            ->andWhere('gs.completedAt > :recentTime') // Seulement les complétions récentes (dernières 5 minutes)
-            ->setParameter('room', $room)
-            ->setParameter('lastEventId', $realLastEventId)
-            ->setParameter('recentTime', new \DateTimeImmutable('-5 minutes'))
-            ->orderBy('gs.completedAt', 'DESC')
-            ->setMaxResults(10)
-            ->getQuery()
-            ->getResult();
-    }
-
     public function getWinner(Room $room): ?GameSession
     {
         return $this->createQueryBuilder('gs')
@@ -98,6 +79,23 @@ class GameSessionRepository extends ServiceEntityRepository
             ->setMaxResults(1)
             ->getQuery()
             ->getOneOrNullResult();
+    }
+
+    public function getRecentCompletions(Room $room, int $lastEventId): array
+    {
+        // Pour simuler les "événements récents", on retourne les sessions complétées
+        // avec un ID supérieur au dernier événement traité
+        // Cette méthode peut être améliorée avec une vraie table d'événements
+        return $this->createQueryBuilder('gs')
+            ->andWhere('gs.room = :room')
+            ->andWhere('gs.isCompleted = true')
+            ->andWhere('gs.id > :lastEventId')
+            ->setParameter('room', $room)
+            ->setParameter('lastEventId', max(0, $lastEventId - 1000)) // Compenser l'offset
+            ->orderBy('gs.completedAt', 'DESC')
+            ->setMaxResults(5)
+            ->getQuery()
+            ->getResult();
     }
 
     public function save(GameSession $entity, bool $flush = false): void
