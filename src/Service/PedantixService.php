@@ -723,38 +723,38 @@ class PedantixService
             $maxProximity = max($maxProximity, $numbersAndDatesProximity);
         }
 
-        // Nouveau système de proximité sémantique avancé
+        // Système de proximité amélioré - plus strict pour éviter les suggestions non pertinentes
         foreach ($allContentWords as $contentWord) {
             $normalizedContentWord = $this->normalizeWord($contentWord);
-            if (strlen($normalizedContentWord) >= 2 && !in_array($normalizedContentWord, $this->getStopWords())) {
+            if (strlen($normalizedContentWord) >= 3 && !in_array($normalizedContentWord, $this->getStopWords())) {
 
-                // 1. Vérifier la similarité sémantique directe
-                $semanticScore = $this->calculateSemanticSimilarity($normalizedContentWord, $normalizedGuess);
-                if ($semanticScore > 0) {
-                    $maxProximity = max($maxProximity, $semanticScore);
-                }
-
-                // 2. Vérifier la distance de Levenshtein (orthographe similaire)
+                // 1. Vérifier la distance de Levenshtein (orthographe similaire) - PLUS STRICT
                 $similarity = $this->calculateLevenshteinSimilarity($normalizedGuess, $normalizedContentWord);
-                if ($similarity > 0.8) {
+                if ($similarity > 0.85) { // Augmenté de 0.8 à 0.85
                     $maxProximity = max($maxProximity, 800 + ($similarity * 100));
-                } elseif ($similarity > 0.6) {
-                    $maxProximity = max($maxProximity, 400 + ($similarity * 200));
-                } elseif ($similarity > 0.4) {
-                    $maxProximity = max($maxProximity, 100 + ($similarity * 100));
+                } elseif ($similarity > 0.75) { // Augmenté de 0.6 à 0.75
+                    $maxProximity = max($maxProximity, 500 + ($similarity * 200));
+                } elseif ($similarity > 0.65) { // Augmenté de 0.4 à 0.65
+                    $maxProximity = max($maxProximity, 200 + ($similarity * 100));
                 }
 
-                // 3. Vérifier les sous-chaînes
-                if (strlen($normalizedGuess) >= 3 && strlen($normalizedContentWord) >= 3) {
+                // 2. Vérifier les sous-chaînes - PLUS STRICT
+                if (strlen($normalizedGuess) >= 4 && strlen($normalizedContentWord) >= 4) { // Augmenté de 3 à 4
                     if (strpos($normalizedGuess, $normalizedContentWord) !== false || strpos($normalizedContentWord, $normalizedGuess) !== false) {
-                        $maxProximity = max($maxProximity, 600);
+                        $maxProximity = max($maxProximity, 400); // Réduit de 600 à 400
                     }
+                }
+
+                // 3. Vérifier la similarité sémantique - BEAUCOUP PLUS STRICT
+                $semanticScore = $this->calculateSemanticSimilarity($normalizedContentWord, $normalizedGuess);
+                if ($semanticScore > 850) { // Augmenté de 0 à 850 - seules les relations très fortes
+                    $maxProximity = max($maxProximity, $semanticScore);
                 }
             }
         }
 
-        // Si aucune proximité significative trouvée, retourner 0 (pas d'affichage)
-        if ($maxProximity < 100) {
+        // Seuil minimal augmenté pour réduire les faux positifs
+        if ($maxProximity < 200) { // Augmenté de 100 à 200
             return 0;
         }
 

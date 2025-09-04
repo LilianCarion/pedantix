@@ -1,0 +1,324 @@
+{% extends 'admin/base.html.twig' %}
+
+{% block page_title %}Articles Wikipedia{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h5 class="mb-0">Total: {{ total }} articles ({{ articles|filter(a => a.isActive)|length }} actifs)</h5>
+    </div>
+    <div>
+        <button class="btn btn-success-admin" onclick="executeAction('{{ path('admin_seed_articles') }}', 'Ajouter de nouveaux articles Wikipedia ?')">
+            <i class="fas fa-plus me-2"></i>Ajouter articles
+        </button>
+    </div>
+</div>
+
+<!-- Filtres de recherche -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label for="search" class="form-label">Recherche</label>
+                <input type="text" class="form-control" id="search" name="search"
+                       value="{{ search }}" placeholder="Titre ou catégorie...">
+            </div>
+            <div class="col-md-2">
+                <label for="category" class="form-label">Catégorie</label>
+                <select class="form-select" id="category" name="category">
+                    <option value="">Toutes</option>
+                    {% for cat in categories %}
+                        <option value="{{ cat }}" {{ category == cat ? 'selected' : '' }}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="difficulty" class="form-label">Difficulté</label>
+                <select class="form-select" id="difficulty" name="difficulty">
+                    <option value="">Toutes</option>
+                    {% for diff in difficulties %}
+                        <option value="{{ diff }}" {{ difficulty == diff ? 'selected' : '' }}>{{ diff }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="fas fa-search"></i>
+                </button>
+                <a href="{{ path('admin_articles') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-times"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Tableau des articles -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-admin mb-0">
+                <thead>
+                    <tr>
+                        <th>Titre</th>
+                        <th>Catégorie</th>
+                        <th>Difficulté</th>
+                        <th>Statut</th>
+                        <th>Ajouté le</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for article in articles %}
+                    <tr class="{{ not article.isActive ? 'table-secondary' : '' }}">
+                        <td>
+                            <div class="fw-bold text-truncate" style="max-width: 250px;" title="{{ article.title }}">
+                                {{ article.title }}
+                            </div>
+                            <small class="text-muted">
+                                <i class="fas fa-link me-1"></i>
+                                <a href="{{ article.url }}" target="_blank" class="text-decoration-none">
+                                    Wikipedia
+                                </a>
+                            </small>
+                        </td>
+                        <td>
+                            {% if article.category %}
+                                <span class="badge bg-info">{{ article.category }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if article.difficulty %}
+                                {% set difficultyClass = article.difficulty == 'Facile' ? 'success' : (article.difficulty == 'Difficile' ? 'danger' : 'warning') %}
+                                <span class="badge bg-{{ difficultyClass }}">{{ article.difficulty }}</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if article.isActive %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check me-1"></i>Actif
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary">
+                                    <i class="fas fa-pause me-1"></i>Inactif
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div>{{ article.createdAt|date('d/m/Y') }}</div>
+                            <small class="text-muted">{{ article.createdAt|date('H:i') }}</small>
+                        </td>
+                        <td class="text-center">
+                            <div class="btn-group" role="group">
+                                <button class="btn btn-sm btn-outline-{{ article.isActive ? 'warning' : 'success' }}"
+                                        onclick="toggleArticle('{{ article.id }}', '{{ article.isActive }}')"
+                                        title="{{ article.isActive ? 'Désactiver' : 'Activer' }}">
+                                    <i class="fas fa-{{ article.isActive ? 'pause' : 'play' }}"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-primary"
+                                        onclick="createRoomFromArticle('{{ article.url|e('js') }}', '{{ article.title|e('js') }}')"
+                                        title="Créer une salle">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                                <a href="{{ article.url }}" class="btn btn-sm btn-outline-info" target="_blank" title="Voir sur Wikipedia">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </a>
+                                <button class="btn btn-sm btn-outline-danger"
+                                        onclick="deleteArticle('{{ article.id }}', '{{ article.title|e('js') }}')"
+                                        title="Supprimer">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-5">
+                            <i class="fas fa-newspaper fa-3x mb-3"></i>
+                            <div>Aucun article trouvé</div>
+                            <button class="btn btn-primary mt-3" onclick="executeAction('{{ path('admin_seed_articles') }}', 'Ajouter des articles Wikipedia ?')">
+                                <i class="fas fa-plus me-2"></i>Ajouter des articles
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if totalPages > 1 %}
+<nav aria-label="Pagination" class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if currentPage > 1 %}
+            <li class="page-item">
+                <a class="page-link" href="{{ path('admin_articles', {page: currentPage - 1, search: search, category: category, difficulty: difficulty}) }}">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+            </li>
+        {% endif %}
+
+        {% for page in 1..totalPages %}
+            {% if page == currentPage %}
+                <li class="page-item active">
+                    <span class="page-link">{{ page }}</span>
+                </li>
+            {% elseif page <= currentPage + 2 and page >= currentPage - 2 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ path('admin_articles', {page: page, search: search, category: category, difficulty: difficulty}) }}">{{ page }}</a>
+                </li>
+            {% elseif page == 1 or page == totalPages %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ path('admin_articles', {page: page, search: search, category: category, difficulty: difficulty}) }}">{{ page }}</a>
+                </li>
+            {% elseif page == currentPage + 3 or page == currentPage - 3 %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+            {% endif %}
+        {% endfor %}
+
+        {% if currentPage < totalPages %}
+            <li class="page-item">
+                <a class="page-link" href="{{ path('admin_articles', {page: currentPage + 1, search: search, category: category, difficulty: difficulty}) }}">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+<!-- Statistiques des articles -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-chart-pie me-2"></i>Répartition par catégorie</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="categoryChart" width="400" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Répartition par difficulté</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="difficultyChart" width="400" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script>
+async function toggleArticle(articleId, currentStatus) {
+    const action = currentStatus === '1' ? 'désactiver' : 'activer';
+    if (!confirm(`Voulez-vous ${action} cet article ?`)) {
+        return;
+    }
+
+    await executeAction(`{{ path('admin_article_toggle', {id: '__ID__'})|replace({'__ID__': ''}) }}${articleId}`, null);
+}
+
+async function deleteArticle(articleId, title) {
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer l'article "${title}" ?\n\nCette action est irréversible.`)) {
+        return;
+    }
+
+    await executeAction(`{{ path('admin_article_delete', {id: '__ID__'})|replace({'__ID__': ''}) }}${articleId}`, null);
+}
+
+function createRoomFromArticle(url, title) {
+    if (confirm(`Créer une nouvelle salle de jeu avec l'article "${title}" ?`)) {
+        // Ouvrir la page d'accueil avec l'URL pré-remplie
+        const homeUrl = `{{ path('app_home') }}?url=${encodeURIComponent(url)}`;
+        window.open(homeUrl, '_blank');
+    }
+}
+
+// Graphiques
+{% if articles|length > 0 %}
+// Graphique des catégories
+const categoryData = {};
+{% for article in articles %}
+    {% set cat = article.category ?: 'Non classé' %}
+    {% if categoryData[cat] is not defined %}
+        categoryData['{{ cat|e('js') }}'] = 0;
+    {% endif %}
+    categoryData['{{ cat|e('js') }}']++;
+{% endfor %}
+
+const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+new Chart(categoryCtx, {
+    type: 'doughnut',
+    data: {
+        labels: Object.keys(categoryData),
+        datasets: [{
+            data: Object.values(categoryData),
+            backgroundColor: [
+                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'
+            ]
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        }
+    }
+});
+
+// Graphique des difficultés
+const difficultyData = {};
+{% for article in articles %}
+    {% set diff = article.difficulty ?: 'Non définie' %}
+    {% if difficultyData[diff] is not defined %}
+        difficultyData['{{ diff|e('js') }}'] = 0;
+    {% endif %}
+    difficultyData['{{ diff|e('js') }}']++;
+{% endfor %}
+
+const difficultyCtx = document.getElementById('difficultyChart').getContext('2d');
+new Chart(difficultyCtx, {
+    type: 'bar',
+    data: {
+        labels: Object.keys(difficultyData),
+        datasets: [{
+            label: 'Nombre d\'articles',
+            data: Object.values(difficultyData),
+            backgroundColor: ['#28a745', '#ffc107', '#dc3545', '#6c757d']
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                display: false
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    stepSize: 1
+                }
+            }
+        }
+    }
+});
+{% endif %}
+</script>
+{% endblock %}

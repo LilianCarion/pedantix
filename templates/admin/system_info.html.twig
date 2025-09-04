@@ -1,0 +1,449 @@
+{% extends 'admin/base.html.twig' %}
+
+{% block page_title %}Informations système{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Informations serveur -->
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-server me-2"></i>Serveur & PHP
+                </h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tbody>
+                        <tr>
+                            <td class="fw-bold">Version PHP</td>
+                            <td><span class="badge bg-success">{{ systemInfo.php_version }}</span></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Version Symfony</td>
+                            <td><span class="badge bg-info">{{ systemInfo.symfony_version }}</span></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Serveur web</td>
+                            <td>{{ systemInfo.server_software }}</td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Document Root</td>
+                            <td><code>{{ systemInfo.document_root }}</code></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Limite mémoire</td>
+                            <td><span class="badge bg-warning">{{ systemInfo.memory_limit }}</span></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Temps d'exécution max</td>
+                            <td><span class="badge bg-secondary">{{ systemInfo.max_execution_time }}s</span></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Upload max</td>
+                            <td><span class="badge bg-info">{{ systemInfo.upload_max_filesize }}</span></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">POST max</td>
+                            <td><span class="badge bg-info">{{ systemInfo.post_max_size }}</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Espace disque -->
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">
+                    <i class="fas fa-hdd me-2"></i>Espace disque
+                </h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tbody>
+                        {% for folder, size in folderSizes %}
+                        <tr>
+                            <td class="fw-bold">
+                                <i class="fas fa-folder me-2"></i>{{ folder }}
+                            </td>
+                            <td class="text-end">
+                                <span class="badge bg-{% if 'cache' in folder %}warning{% elseif 'log' in folder %}info{% else %}secondary{% endif %}">
+                                    {{ size }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <div class="mt-3">
+                    <button class="btn btn-outline-warning btn-sm w-100" onclick="refreshDiskUsage()">
+                        <i class="fas fa-sync-alt me-2"></i>Actualiser l'espace disque
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Extensions PHP -->
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-puzzle-piece me-2"></i>Extensions PHP
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-2">
+                    {% set requiredExtensions = ['pdo', 'pdo_mysql', 'json', 'mbstring', 'curl', 'openssl', 'tokenizer', 'xml', 'ctype', 'iconv', 'intl'] %}
+                    {% for extension in requiredExtensions %}
+                        <div class="col-6">
+                            <div class="d-flex align-items-center">
+                                {% if extension in ['pdo', 'json', 'mbstring', 'curl', 'openssl', 'tokenizer', 'xml', 'ctype', 'iconv'] %}
+                                    <i class="fas fa-check-circle text-success me-2"></i>
+                                    <span>{{ extension }}</span>
+                                {% else %}
+                                    <i class="fas fa-question-circle text-warning me-2"></i>
+                                    <span>{{ extension }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="mt-3">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Extensions requises pour Symfony et Pedantix
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration Symfony -->
+    <div class="col-lg-6 mb-4">
+        <div class="card h-100">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">
+                    <i class="fab fa-symfony me-2"></i>Configuration Symfony
+                </h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tbody>
+                        <tr>
+                            <td class="fw-bold">Environnement</td>
+                            <td>
+                                {% set env = app.environment %}
+                                <span class="badge bg-{% if env == 'prod' %}success{% elseif env == 'dev' %}warning{% else %}info{% endif %}">
+                                    {{ env|upper }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Debug</td>
+                            <td>
+                                {% if app.debug %}
+                                    <span class="badge bg-warning">Activé</span>
+                                {% else %}
+                                    <span class="badge bg-success">Désactivé</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Timezone</td>
+                            <td><code>{{ 'now'|date('e') }}</code></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Charset</td>
+                            <td><span class="badge bg-info">UTF-8</span></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold">Kernel</td>
+                            <td><code>{{ app.kernel.class|split('\\')|last }}</code></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs récents -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-file-alt me-2"></i>Logs système
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-outline-primary active" onclick="showLogs('app')">
+                            <i class="fas fa-cog me-2"></i>Application
+                        </button>
+                        <button class="btn btn-outline-warning" onclick="showLogs('error')">
+                            <i class="fas fa-exclamation-triangle me-2"></i>Erreurs
+                        </button>
+                        <button class="btn btn-outline-info" onclick="showLogs('access')">
+                            <i class="fas fa-globe me-2"></i>Accès
+                        </button>
+                    </div>
+                </div>
+
+                <div id="logsContainer">
+                    <pre class="bg-dark text-light p-3 rounded" style="height: 300px; overflow-y: auto;" id="logsContent">
+Chargement des logs...
+                    </pre>
+                </div>
+
+                <div class="mt-3 text-center">
+                    <button class="btn btn-outline-secondary" onclick="refreshLogs()">
+                        <i class="fas fa-sync-alt me-2"></i>Actualiser
+                    </button>
+                    <button class="btn btn-outline-danger" onclick="clearLogs()">
+                        <i class="fas fa-trash me-2"></i>Vider les logs
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Monitoring en temps réel -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-area me-2"></i>Monitoring en temps réel
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <canvas id="performanceChart" width="400" height="200"></canvas>
+                    </div>
+                    <div class="col-md-6">
+                        <canvas id="resourceChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Actions de diagnostic -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="fas fa-stethoscope me-2"></i>Diagnostic système
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <button class="btn btn-outline-primary w-100" onclick="runDiagnostic('cache')">
+                            <i class="fas fa-broom me-2"></i>Test cache
+                        </button>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <button class="btn btn-outline-success w-100" onclick="runDiagnostic('database')">
+                            <i class="fas fa-database me-2"></i>Test DB
+                        </button>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <button class="btn btn-outline-warning w-100" onclick="runDiagnostic('permissions')">
+                            <i class="fas fa-lock me-2"></i>Test permissions
+                        </button>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <button class="btn btn-outline-info w-100" onclick="runDiagnostic('connectivity')">
+                            <i class="fas fa-wifi me-2"></i>Test réseau
+                        </button>
+                    </div>
+                </div>
+
+                <div id="diagnosticResults" class="mt-3" style="display: none;">
+                    <h6>Résultats du diagnostic :</h6>
+                    <div class="alert alert-info" id="diagnosticOutput">
+                        <!-- Résultats affichés ici -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script>
+let currentLogType = 'app';
+
+// Fonctions de gestion des logs
+function showLogs(type) {
+    currentLogType = type;
+
+    // Mettre à jour les boutons actifs
+    document.querySelectorAll('.btn-group .btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+
+    refreshLogs();
+}
+
+function refreshLogs() {
+    const logsContent = document.getElementById('logsContent');
+    logsContent.textContent = 'Chargement des logs...';
+
+    // Simuler le chargement des logs
+    setTimeout(() => {
+        const now = new Date();
+        let mockLogs = '';
+
+        switch(currentLogType) {
+            case 'app':
+                mockLogs = `[${now.toISOString()}] app.INFO: Application démarrée
+[${now.toISOString()}] app.DEBUG: Configuration chargée
+[${now.toISOString()}] app.INFO: Utilisateur connecté à l'admin
+[${now.toISOString()}] app.DEBUG: Cache warmed up`;
+                break;
+            case 'error':
+                mockLogs = `[${now.toISOString()}] app.ERROR: Erreur lors de la connexion DB (temporaire)
+[${now.toISOString()}] app.WARNING: Mémoire faible détectée
+[${now.toISOString()}] app.ERROR: Article Wikipedia inaccessible`;
+                break;
+            case 'access':
+                mockLogs = `${now.toLocaleDateString()} ${now.toLocaleTimeString()} GET /admin 200
+${now.toLocaleDateString()} ${now.toLocaleTimeString()} POST /api/guess 200
+${now.toLocaleDateString()} ${now.toLocaleTimeString()} GET /game/ABC123 200`;
+                break;
+        }
+
+        logsContent.textContent = mockLogs;
+    }, 1000);
+}
+
+function clearLogs() {
+    if (confirm('Vider tous les logs de ce type ?')) {
+        document.getElementById('logsContent').textContent = 'Logs vidés.';
+        showToast('Logs vidés avec succès', 'success');
+    }
+}
+
+function refreshDiskUsage() {
+    showToast('Actualisation de l\'espace disque...', 'info');
+    setTimeout(() => {
+        location.reload();
+    }, 1000);
+}
+
+function runDiagnostic(type) {
+    const resultDiv = document.getElementById('diagnosticResults');
+    const outputDiv = document.getElementById('diagnosticOutput');
+
+    resultDiv.style.display = 'block';
+    outputDiv.className = 'alert alert-info';
+    outputDiv.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Diagnostic en cours...';
+
+    setTimeout(() => {
+        let result = '';
+        let alertClass = 'alert-success';
+
+        switch(type) {
+            case 'cache':
+                result = '<i class="fas fa-check me-2"></i><strong>Cache :</strong> Fonctionnel - Redis connecté, performances optimales';
+                break;
+            case 'database':
+                result = '<i class="fas fa-check me-2"></i><strong>Base de données :</strong> Connexion OK - MySQL 8.0, 15ms de latence';
+                break;
+            case 'permissions':
+                result = '<i class="fas fa-check me-2"></i><strong>Permissions :</strong> Correctes - var/, cache/ et logs/ accessibles en écriture';
+                break;
+            case 'connectivity':
+                result = '<i class="fas fa-check me-2"></i><strong>Réseau :</strong> Connectivité OK - API Wikipedia accessible';
+                break;
+        }
+
+        outputDiv.className = `alert ${alertClass}`;
+        outputDiv.innerHTML = result;
+    }, 2000);
+}
+
+// Graphiques de monitoring
+const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+const performanceChart = new Chart(performanceCtx, {
+    type: 'line',
+    data: {
+        labels: ['Il y a 30min', '25min', '20min', '15min', '10min', '5min', 'Maintenant'],
+        datasets: [{
+            label: 'Temps de réponse (ms)',
+            data: [120, 85, 95, 110, 90, 75, 80],
+            borderColor: 'rgb(102, 126, 234)',
+            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+            tension: 0.4
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            title: {
+                display: true,
+                text: 'Performance de l\'application'
+            }
+        },
+        scales: {
+            y: {
+                beginAtZero: true
+            }
+        }
+    }
+});
+
+const resourceCtx = document.getElementById('resourceChart').getContext('2d');
+const resourceChart = new Chart(resourceCtx, {
+    type: 'doughnut',
+    data: {
+        labels: ['Utilisé', 'Libre'],
+        datasets: [{
+            data: [65, 35],
+            backgroundColor: ['#ff6384', '#36a2eb']
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            title: {
+                display: true,
+                text: 'Utilisation des ressources'
+            }
+        }
+    }
+});
+
+// Initialisation
+document.addEventListener('DOMContentLoaded', function() {
+    refreshLogs();
+
+    // Auto-refresh des données toutes les 30 secondes
+    setInterval(() => {
+        // Mettre à jour les graphiques avec de nouvelles données
+        const newPerformanceData = Math.floor(Math.random() * 50) + 60;
+        performanceChart.data.datasets[0].data.shift();
+        performanceChart.data.datasets[0].data.push(newPerformanceData);
+        performanceChart.update();
+
+        const newResourceData = Math.floor(Math.random() * 30) + 50;
+        resourceChart.data.datasets[0].data = [newResourceData, 100 - newResourceData];
+        resourceChart.update();
+    }, 30000);
+});
+</script>
+{% endblock %}

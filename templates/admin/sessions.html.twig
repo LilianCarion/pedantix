@@ -1,0 +1,237 @@
+{% extends 'admin/base.html.twig' %}
+
+{% block page_title %}Sessions joueurs{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h5 class="mb-0">Total: {{ total }} sessions</h5>
+    </div>
+</div>
+
+<!-- Filtres de recherche -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <div class="col-md-4">
+                <label for="search" class="form-label">Recherche</label>
+                <input type="text" class="form-control" id="search" name="search"
+                       value="{{ search }}" placeholder="Nom joueur, code salle ou titre...">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="fas fa-search"></i>
+                </button>
+                <a href="{{ path('admin_sessions') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-times"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Tableau des sessions -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-admin mb-0">
+                <thead>
+                    <tr>
+                        <th>Joueur</th>
+                        <th>Salle</th>
+                        <th>Score</th>
+                        <th>Progression</th>
+                        <th>Statut</th>
+                        <th>Dernière activité</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for session in sessions %}
+                    <tr class="{{ session.isCompleted ? 'table-success' : '' }}">
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-2"
+                                     style="width: 35px; height: 35px; font-size: 14px; font-weight: bold;">
+                                    {{ session.playerName|slice(0, 2)|upper }}
+                                </div>
+                                <div>
+                                    <div class="fw-bold">{{ session.playerName }}</div>
+                                    <small class="text-muted">{{ session.ipAddress }}</small>
+                                </div>
+                            </div>
+                        </td>
+                        <td>
+                            <div>
+                                <code class="bg-primary text-white px-2 py-1 rounded">{{ session.room.code }}</code>
+                                <span class="badge bg-{{ session.room.gameMode == 'cooperation' ? 'info' : 'primary' }} ms-1">
+                                    {{ session.room.gameMode == 'cooperation' ? 'Coop' : 'Compét' }}
+                                </span>
+                            </div>
+                            <div class="text-truncate" style="max-width: 200px;" title="{{ session.room.title }}">
+                                <small class="text-muted">{{ session.room.title }}</small>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="fw-bold text-{{ session.isCompleted ? 'success' : 'primary' }}">
+                                {{ session.score|number_format(0, ',', ' ') }}
+                            </div>
+                            {% if session.isCompleted %}
+                                <small class="text-success">
+                                    <i class="fas fa-trophy me-1"></i>Terminé
+                                </small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div class="me-2">
+                                    <div class="fw-bold">{{ session.foundWords|length }} mots</div>
+                                    <small class="text-muted">{{ session.attempts }} tentatives</small>
+                                </div>
+                                {% if session.foundWords|length > 0 %}
+                                    <div class="progress" style="width: 60px; height: 8px;">
+                                        {% set progressPercent = (session.foundWords|length / (session.room.wordsToFind|length)) * 100 %}
+                                        <div class="progress-bar bg-success" style="width: {{ progressPercent }}%"></div>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            {% if session.isCompleted %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check me-1"></i>Terminé
+                                </span>
+                                {% if session.completedAt %}
+                                    <br><small class="text-muted">{{ session.completedAt|date('d/m H:i') }}</small>
+                                {% endif %}
+                            {% elseif session.lastActivity > date('-10 minutes') %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-circle me-1"></i>En ligne
+                                </span>
+                            {% elseif session.lastActivity > date('-1 hour') %}
+                                <span class="badge bg-warning">
+                                    <i class="fas fa-clock me-1"></i>Récent
+                                </span>
+                            {% else %}
+                                <span class="badge bg-secondary">
+                                    <i class="fas fa-moon me-1"></i>Inactif
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div>{{ session.lastActivity|date('d/m/Y') }}</div>
+                            <small class="text-muted">{{ session.lastActivity|date('H:i:s') }}</small>
+
+                            {% set timeDiff = date().timestamp - session.lastActivity.timestamp %}
+                            {% if timeDiff < 3600 %}
+                                <br><small class="text-success">Il y a {{ (timeDiff / 60)|round }} min</small>
+                            {% elseif timeDiff < 86400 %}
+                                <br><small class="text-warning">Il y a {{ (timeDiff / 3600)|round }}h</small>
+                            {% else %}
+                                <br><small class="text-muted">Il y a {{ (timeDiff / 86400)|round }}j</small>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            <div class="btn-group" role="group">
+                                <a href="{{ path('app_game_room', {roomCode: session.room.code}) }}"
+                                   class="btn btn-sm btn-outline-primary" target="_blank" title="Voir la salle">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <button class="btn btn-sm btn-outline-info"
+                                        onclick="showSessionDetails('{{ session.id }}')"
+                                        title="Détails">
+                                    <i class="fas fa-info"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-5">
+                            <i class="fas fa-users fa-3x mb-3"></i>
+                            <div>Aucune session trouvée</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if totalPages > 1 %}
+<nav aria-label="Pagination" class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if currentPage > 1 %}
+            <li class="page-item">
+                <a class="page-link" href="{{ path('admin_sessions', {page: currentPage - 1, search: search}) }}">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+            </li>
+        {% endif %}
+
+        {% for page in 1..totalPages %}
+            {% if page == currentPage %}
+                <li class="page-item active">
+                    <span class="page-link">{{ page }}</span>
+                </li>
+            {% elseif page <= currentPage + 2 and page >= currentPage - 2 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ path('admin_sessions', {page: page, search: search}) }}">{{ page }}</a>
+                </li>
+            {% elseif page == 1 or page == totalPages %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ path('admin_sessions', {page: page, search: search}) }}">{{ page }}</a>
+                </li>
+            {% elseif page == currentPage + 3 or page == currentPage - 3 %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+            {% endif %}
+        {% endfor %}
+
+        {% if currentPage < totalPages %}
+            <li class="page-item">
+                <a class="page-link" href="{{ path('admin_sessions', {page: currentPage + 1, search: search}) }}">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+
+<!-- Modal pour les détails de session -->
+<div class="modal fade" id="sessionDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Détails de la session</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="sessionDetailsContent">
+                <!-- Contenu chargé dynamiquement -->
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script>
+function showSessionDetails(sessionId) {
+    // Pour l'instant, afficher les infos basiques
+    // Dans une version future, on pourrait charger plus de détails via AJAX
+    const modal = new bootstrap.Modal(document.getElementById('sessionDetailsModal'));
+    document.getElementById('sessionDetailsContent').innerHTML = `
+        <div class="text-center">
+            <i class="fas fa-spinner fa-spin fa-2x mb-3"></i>
+            <p>Fonctionnalité en développement...</p>
+            <p class="text-muted">Session ID: ${sessionId}</p>
+        </div>
+    `;
+    modal.show();
+}
+</script>
+{% endblock %}

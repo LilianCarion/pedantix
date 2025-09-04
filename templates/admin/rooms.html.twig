@@ -1,0 +1,211 @@
+{% extends 'admin/base.html.twig' %}
+
+{% block page_title %}Gestion des salles{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h5 class="mb-0">Total: {{ total }} salles</h5>
+    </div>
+    <div>
+        <a href="{{ path('app_home') }}" class="btn btn-admin" target="_blank">
+            <i class="fas fa-plus me-2"></i>Créer une nouvelle salle
+        </a>
+    </div>
+</div>
+
+<!-- Filtres de recherche -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label for="search" class="form-label">Recherche</label>
+                <input type="text" class="form-control" id="search" name="search"
+                       value="{{ search }}" placeholder="Code ou titre...">
+            </div>
+            <div class="col-md-2">
+                <label for="gameMode" class="form-label">Mode de jeu</label>
+                <select class="form-select" id="gameMode" name="gameMode">
+                    <option value="">Tous</option>
+                    <option value="competition" {{ gameMode == 'competition' ? 'selected' : '' }}>Compétition</option>
+                    <option value="cooperation" {{ gameMode == 'cooperation' ? 'selected' : '' }}>Coopération</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="status" class="form-label">Statut</label>
+                <select class="form-select" id="status" name="status">
+                    <option value="">Tous</option>
+                    <option value="active" {{ status == 'active' ? 'selected' : '' }}>Actives</option>
+                    <option value="completed" {{ status == 'completed' ? 'selected' : '' }}>Terminées</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary me-2">
+                    <i class="fas fa-search"></i>
+                </button>
+                <a href="{{ path('admin_rooms') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-times"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Tableau des salles -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-admin mb-0">
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Titre</th>
+                        <th>Mode</th>
+                        <th>Statut</th>
+                        <th>Joueurs</th>
+                        <th>Créée le</th>
+                        <th class="text-center">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for room in rooms %}
+                    <tr>
+                        <td>
+                            <code class="bg-primary text-white px-2 py-1 rounded">{{ room.code }}</code>
+                        </td>
+                        <td>
+                            <div class="fw-bold text-truncate" style="max-width: 200px;" title="{{ room.title }}">
+                                {{ room.title }}
+                            </div>
+                            <small class="text-muted">
+                                <i class="fas fa-link me-1"></i>
+                                <a href="{{ room.url }}" target="_blank" class="text-decoration-none">
+                                    {{ room.url|length > 50 ? room.url|slice(0, 50) ~ '...' : room.url }}
+                                </a>
+                            </small>
+                        </td>
+                        <td>
+                            <span class="badge bg-{{ room.gameMode == 'cooperation' ? 'info' : 'primary' }}">
+                                <i class="fas fa-{{ room.gameMode == 'cooperation' ? 'users' : 'trophy' }} me-1"></i>
+                                {{ room.gameMode == 'cooperation' ? 'Coopération' : 'Compétition' }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if room.isGameCompleted %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check me-1"></i>Terminée
+                                </span>
+                                {% if room.completedAt %}
+                                    <br><small class="text-muted">{{ room.completedAt|date('d/m H:i') }}</small>
+                                {% endif %}
+                            {% else %}
+                                <span class="badge bg-warning">
+                                    <i class="fas fa-play me-1"></i>Active
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set activeCount = 0 %}
+                            {% set completedCount = 0 %}
+                            {% for session in room.gameSessions %}
+                                {% if session.lastActivity > date('-1 hour') %}
+                                    {% set activeCount = activeCount + 1 %}
+                                {% endif %}
+                                {% if session.isCompleted %}
+                                    {% set completedCount = completedCount + 1 %}
+                                {% endif %}
+                            {% endfor %}
+
+                            <div>
+                                <span class="badge bg-success">{{ completedCount }} terminés</span>
+                                <span class="badge bg-info">{{ activeCount }} actifs</span>
+                            </div>
+                            <small class="text-muted">{{ room.gameSessions|length }} total</small>
+                        </td>
+                        <td>
+                            <div>{{ room.createdAt|date('d/m/Y') }}</div>
+                            <small class="text-muted">{{ room.createdAt|date('H:i') }}</small>
+                        </td>
+                        <td class="text-center">
+                            <div class="btn-group" role="group">
+                                <a href="{{ path('app_game_room', {roomCode: room.code}) }}"
+                                   class="btn btn-sm btn-outline-primary" target="_blank" title="Voir la salle">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <button class="btn btn-sm btn-outline-danger"
+                                        onclick="deleteRoom('{{ room.id }}', '{{ room.code }}')"
+                                        title="Supprimer">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-5">
+                            <i class="fas fa-door-open fa-3x mb-3"></i>
+                            <div>Aucune salle trouvée</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Pagination -->
+{% if totalPages > 1 %}
+<nav aria-label="Pagination" class="mt-4">
+    <ul class="pagination justify-content-center">
+        {% if currentPage > 1 %}
+            <li class="page-item">
+                <a class="page-link" href="{{ path('admin_rooms', {page: currentPage - 1, search: search, gameMode: gameMode, status: status}) }}">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+            </li>
+        {% endif %}
+
+        {% for page in 1..totalPages %}
+            {% if page == currentPage %}
+                <li class="page-item active">
+                    <span class="page-link">{{ page }}</span>
+                </li>
+            {% elseif page <= currentPage + 2 and page >= currentPage - 2 %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ path('admin_rooms', {page: page, search: search, gameMode: gameMode, status: status}) }}">{{ page }}</a>
+                </li>
+            {% elseif page == 1 or page == totalPages %}
+                <li class="page-item">
+                    <a class="page-link" href="{{ path('admin_rooms', {page: page, search: search, gameMode: gameMode, status: status}) }}">{{ page }}</a>
+                </li>
+            {% elseif page == currentPage + 3 or page == currentPage - 3 %}
+                <li class="page-item disabled">
+                    <span class="page-link">...</span>
+                </li>
+            {% endif %}
+        {% endfor %}
+
+        {% if currentPage < totalPages %}
+            <li class="page-item">
+                <a class="page-link" href="{{ path('admin_rooms', {page: currentPage + 1, search: search, gameMode: gameMode, status: status}) }}">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
+{% endblock %}
+
+{% block javascripts %}
+<script>
+async function deleteRoom(roomId, roomCode) {
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer la salle "${roomCode}" ?\n\nCette action supprimera également toutes les sessions liées.`)) {
+        return;
+    }
+
+    await executeAction(`{{ path('admin_room_delete', {id: '__ID__'})|replace({'__ID__': ''}) }}${roomId}`, null);
+}
+</script>
+{% endblock %}

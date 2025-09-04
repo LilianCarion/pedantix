@@ -982,6 +982,37 @@ function showConfetti() {
     }
 }
 
+// Fonction manquante pour stocker les proximités localement
+function storeProximityLocally(word, proximity) {
+    try {
+        const key = `proximities_${roomCode}`;
+        let stored = JSON.parse(localStorage.getItem(key) || '[]');
+
+        // Éviter les doublons et limiter à 20 entrées max
+        stored = stored.filter(item => item.word !== word);
+        stored.push({ word: word, proximity: proximity });
+
+        // Garder seulement les 20 plus récents
+        if (stored.length > 20) {
+            stored = stored.slice(-20);
+        }
+
+        localStorage.setItem(key, JSON.stringify(stored));
+    } catch (error) {
+        console.warn('Impossible de stocker les proximités:', error);
+    }
+}
+
+// Fonction pour nettoyer les proximités stockées (appelée en cas de nouvelle partie)
+function clearStoredProximities() {
+    try {
+        const key = `proximities_${roomCode}`;
+        localStorage.removeItem(key);
+    } catch (error) {
+        console.warn('Impossible de nettoyer les proximités:', error);
+    }
+}
+
 async function updateLeaderboard() {
     try {
         const response = await fetch(`/api/leaderboard/${roomCode}`);
