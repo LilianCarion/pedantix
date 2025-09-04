@@ -1,11 +1,22 @@
 <?php
+// Forcer l'interprétation PHP et éviter la mise en cache
+header('Content-Type: text/html; charset=UTF-8');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+// Vérifier que PHP fonctionne
+if (!function_exists('phpversion')) {
+    die('PHP non disponible sur ce serveur');
+}
+
 /**
  * Script de déploiement web automatique pour OVH avec gestion des versions PHP
  * À exécuter UNE SEULE FOIS après upload via navigateur web
  * URL: http://analantix.ovh/deploy.php
  */
 
-// Configuration OVH pré-remplie
+// Configuration OVH pré-remplie avec vos vraies données
 $ovh_config = [
     'db_host' => 'analanjroot.mysql.db',
     'db_name' => 'analanjroot',

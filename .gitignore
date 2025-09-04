@@ -1,4 +1,3 @@
-
 ###> symfony/framework-bundle ###
 /.env.local
 /.env.local.php
@@ -8,7 +7,12 @@
 /var/
 /vendor/
 ###< symfony/framework-bundle ###
-.env
-.env.dev
-.env.local
-.env.prod
+# Ignorer les fichiers .env sensibles mais garder les exemples
+/.env
+/.env.dev
+/.env.local
+/.env.prod
+
+# Autoriser les fichiers d'exemple
+!/.env.example
+!/.env.dist
