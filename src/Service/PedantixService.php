@@ -694,276 +694,9 @@ class PedantixService
         ];
     }
 
-    private function calculateSemanticProximity(string $guess, string $content, string $title): int
-    {
-        $normalizedGuess = $this->normalizeWord($guess);
-        $titleWords = array_map([$this, 'normalizeWord'], $this->extractTitleWords($title));
-
-        // Extraire TOUS les mots de l'article, pas seulement le titre
-        $allContentWords = $this->extractAllWordsFromContent($content);
-        $contentWords = array_map([$this, 'normalizeWord'], $allContentWords);
-
-        $maxProximity = 0;
-
-        // Vérifier la proximité avec les mots du titre (proximité maximale)
-        foreach ($titleWords as $titleWord) {
-            $similarity = $this->calculateLevenshteinSimilarity($normalizedGuess, $titleWord);
-            if ($similarity > 0.7) {
-                $maxProximity = max($maxProximity, 950 + ($similarity * 50));
-            }
-        }
-
-        // Vérifier si le mot deviné est un nombre ou une date
-        $isGuessNumber = $this->isNumber($guess);
-        $isGuessDate = $this->isDate($guess);
-
-        // Si le mot deviné est un nombre ou une date, vérifier la proximité avec les nombres/dates de l'article
-        if ($isGuessNumber || $isGuessDate) {
-            $numbersAndDatesProximity = $this->calculateNumbersAndDatesProximity($guess, $content, $isGuessNumber, $isGuessDate);
-            $maxProximity = max($maxProximity, $numbersAndDatesProximity);
-        }
-
-        // Nouveau système de proximité sémantique avancé
-        foreach ($allContentWords as $contentWord) {
-            $normalizedContentWord = $this->normalizeWord($contentWord);
-            if (strlen($normalizedContentWord) >= 2 && !in_array($normalizedContentWord, $this->getStopWords())) {
-
-                // 1. Vérifier la similarité sémantique directe
-                $semanticScore = $this->calculateSemanticSimilarity($normalizedContentWord, $normalizedGuess);
-                if ($semanticScore > 0) {
-                    $maxProximity = max($maxProximity, $semanticScore);
-                }
-
-                // 2. Vérifier la distance de Levenshtein (orthographe similaire)
-                $similarity = $this->calculateLevenshteinSimilarity($normalizedGuess, $normalizedContentWord);
-                if ($similarity > 0.8) {
-                    $maxProximity = max($maxProximity, 800 + ($similarity * 100));
-                } elseif ($similarity > 0.6) {
-                    $maxProximity = max($maxProximity, 400 + ($similarity * 200));
-                } elseif ($similarity > 0.4) {
-                    $maxProximity = max($maxProximity, 100 + ($similarity * 100));
-                }
-
-                // 3. Vérifier les sous-chaînes
-                if (strlen($normalizedGuess) >= 3 && strlen($normalizedContentWord) >= 3) {
-                    if (strpos($normalizedGuess, $normalizedContentWord) !== false || strpos($normalizedContentWord, $normalizedGuess) !== false) {
-                        $maxProximity = max($maxProximity, 600);
-                    }
-                }
-            }
-        }
-
-        // Si aucune proximité significative trouvée, retourner 0 (pas d'affichage)
-        if ($maxProximity < 100) {
-            return 0;
-        }
-
-        return min(999, $maxProximity);
-    }
-
-    /**
-     * Vérifie si une chaîne représente un nombre
-     */
-    private function isNumber(string $text): bool
-    {
-        // Enlever les espaces et normaliser
-        $text = trim($text);
-
-        // Vérifier les nombres entiers
-        if (preg_match('/^\d+$/', $text)) {
-            return true;
-        }
-
-        // Vérifier les nombres décimaux (avec . ou ,)
-        if (preg_match('/^\d+[.,]\d+$/', $text)) {
-            return true;
-        }
-
-        // Vérifier les nombres avec séparateurs de milliers
-        if (preg_match('/^\d{1,3}([ .,]\d{3})*$/', $text)) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Vérifie si une chaîne représente une date
-     */
-    private function isDate(string $text): bool
-    {
-        $text = trim($text);
-
-        // Formats de dates courants
-        $datePatterns = [
-            '/^\d{1,2}\/\d{1,2}\/\d{2,4}$/', // 15/08/1995 ou 15/08/95
-            '/^\d{1,2}-\d{1,2}-\d{2,4}$/',   // 15-08-1995 ou 15-08-95
-            '/^\d{4}-\d{1,2}-\d{1,2}$/',     // 1995-08-15
-            '/^\d{1,2}\s+\w+\s+\d{4}$/',     // 15 août 1995
-            '/^\w+\s+\d{1,2},?\s+\d{4}$/',   // août 15, 1995
-            '/^\d{4}$/',                      // 1995 (année seule)
-        ];
-
-        foreach ($datePatterns as $pattern) {
-            if (preg_match($pattern, $text)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Calcule la proximité entre un nombre/date deviné et les nombres/dates de l'article
-     */
-    private function calculateNumbersAndDatesProximity(string $guess, string $content, bool $isGuessNumber, bool $isGuessDate): int
-    {
-        $maxProximity = 0;
-
-        // Extraire tous les nombres et dates du contenu
-        $words = preg_split('/\s+/', $content);
-
-        foreach ($words as $word) {
-            $cleanWord = preg_replace('/[^\w\d\/\-.,]/', '', $word);
-
-            if ($isGuessNumber && $this->isNumber($cleanWord)) {
-                $proximity = $this->calculateNumberProximity($guess, $cleanWord);
-                $maxProximity = max($maxProximity, $proximity);
-            }
-
-            if ($isGuessDate && $this->isDate($cleanWord)) {
-                $proximity = $this->calculateDateProximity($guess, $cleanWord);
-                $maxProximity = max($maxProximity, $proximity);
-            }
-        }
-
-        return $maxProximity;
-    }
-
-    /**
-     * Calcule la proximité entre deux nombres
-     */
-    private function calculateNumberProximity(string $number1, string $number2): int
-    {
-        // Convertir en nombres pour comparaison
-        $num1 = $this->parseNumber($number1);
-        $num2 = $this->parseNumber($number2);
-
-        if ($num1 === null || $num2 === null) {
-            return 0;
-        }
-
-        // Si les nombres sont identiques
-        if ($num1 == $num2) {
-            return 950;
-        }
-
-        // Calculer la différence relative
-        $diff = abs($num1 - $num2);
-        $average = ($num1 + $num2) / 2;
-        $relativeDiff = $average > 0 ? ($diff / $average) : 1;
-
-        // Plus la différence relative est petite, plus la proximité est haute
-        if ($relativeDiff <= 0.1) {
-            return 850; // Très proche (différence de 10% ou moins)
-        } elseif ($relativeDiff <= 0.25) {
-            return 700; // Proche (différence de 25% ou moins)
-        } elseif ($relativeDiff <= 0.5) {
-            return 500; // Moyennement proche
-        } elseif ($relativeDiff <= 1.0) {
-            return 300; // Assez proche
-        } elseif ($relativeDiff <= 2.0) {
-            return 150; // Distant mais détectable
-        }
-
-        return 0;
-    }
-
-    /**
-     * Calcule la proximité entre deux dates
-     */
-    private function calculateDateProximity(string $date1, string $date2): int
-    {
-        $timestamp1 = $this->parseDate($date1);
-        $timestamp2 = $this->parseDate($date2);
-
-        if ($timestamp1 === null || $timestamp2 === null) {
-            return 0;
-        }
-
-        // Si les dates sont identiques
-        if ($timestamp1 == $timestamp2) {
-            return 950;
-        }
-
-        // Calculer la différence en jours
-        $diffDays = abs($timestamp1 - $timestamp2) / (60 * 60 * 24);
-
-        // Proximité basée sur la différence en jours
-        if ($diffDays <= 7) {
-            return 850; // Même semaine
-        } elseif ($diffDays <= 30) {
-            return 700; // Même mois approximativement
-        } elseif ($diffDays <= 365) {
-            return 500; // Même année approximativement
-        } elseif ($diffDays <= 1825) { // 5 ans
-            return 300; // Proche dans le temps
-        } elseif ($diffDays <= 3650) { // 10 ans
-            return 150; // Assez proche
-        }
-
-        return 0;
-    }
-
-    /**
-     * Parse un nombre depuis une chaîne
-     */
-    private function parseNumber(string $numberStr): ?float
-    {
-        $numberStr = trim($numberStr);
-        $numberStr = str_replace([' ', ','], ['', '.'], $numberStr);
-        $numberStr = preg_replace('/[^\d.]/', '', $numberStr);
-
-        if (is_numeric($numberStr)) {
-            return (float) $numberStr;
-        }
-
-        return null;
-    }
-
-    /**
-     * Parse une date depuis une chaîne
-     */
-    private function parseDate(string $dateStr): ?int
-    {
-        $dateStr = trim($dateStr);
-
-        // Si c'est juste une année
-        if (preg_match('/^\d{4}$/', $dateStr)) {
-            return mktime(0, 0, 0, 1, 1, (int)$dateStr);
-        }
-
-        // Essayer différents formats
-        $formats = [
-            'd/m/Y', 'd-m-Y', 'Y-m-d', 'd/m/y', 'd-m-y',
-            'j F Y', 'F j, Y', 'j M Y', 'M j, Y'
-        ];
-
-        foreach ($formats as $format) {
-            $date = \DateTime::createFromFormat($format, $dateStr);
-            if ($date !== false) {
-                return $date->getTimestamp();
-            }
-        }
-
-        // Essayer strtotime comme dernier recours
-        $timestamp = strtotime($dateStr);
-        return $timestamp !== false ? $timestamp : null;
-    }
-
     private function calculateSemanticSimilarity(string $word1, string $word2): int
     {
-        // Base de données de relations sémantiques simplifiée
+        // Système de proximité sémantique BEAUCOUP plus strict
         $semanticGroups = $this->getSemanticGroups();
 
         $group1 = null;
@@ -979,254 +712,102 @@ class PedantixService
             }
         }
 
-        // Si les deux mots sont dans le même groupe sémantique
+        // SEULEMENT si les deux mots sont dans le même groupe sémantique EXACT
         if ($group1 && $group2 && $group1 === $group2) {
-            return 900; // Très haute proximité sémantique
+            // Vérifier que les mots sont réellement liés dans le contexte
+            if ($this->areWordsContextuallyRelated($word1, $word2, $group1)) {
+                return 850; // Proximité sémantique élevée mais réduite
+            }
         }
 
-        // Vérifier les groupes liés
-        $relatedGroups = $this->getRelatedSemanticGroups();
-        if ($group1 && $group2 && isset($relatedGroups[$group1]) && in_array($group2, $relatedGroups[$group1])) {
-            return 700; // Proximité sémantique élevée
-        }
-
-        // Vérifier les synonymes directs
+        // Vérifier les synonymes directs SEULEMENT (plus de groupes liés)
         $synonyms = $this->getSynonyms();
         if (isset($synonyms[$word1]) && in_array($word2, $synonyms[$word1])) {
-            return 850;
+            return 800;
         }
         if (isset($synonyms[$word2]) && in_array($word1, $synonyms[$word2])) {
-            return 850;
+            return 800;
         }
 
+        // Si aucune relation directe, retourner 0 (pas de proximité sémantique)
         return 0;
+    }
+
+    /**
+     * Vérifie si deux mots sont contextuellement liés dans un groupe sémantique
+     */
+    private function areWordsContextuallyRelated(string $word1, string $word2, string $group): bool
+    {
+        // Règles très strictes pour éviter les fausses associations
+        $strictRelations = [
+            'etats_matiere' => [
+                'liquide' => ['fluide', 'eau'],
+                'gaz' => ['vapeur', 'gazeux'],
+                'solide' => ['dur', 'cristallin']
+            ],
+            'chimie' => [
+                'eau' => ['h2o', 'hydrogene', 'oxygene'],
+                'molecule' => ['atome', 'compose'],
+                'reaction' => ['chimique', 'transformation']
+            ],
+            'eau_related' => [
+                'eau' => ['aquatique', 'hydrique', 'hydraulique'],
+                'ocean' => ['marin', 'maritime', 'oceanique'],
+                'riviere' => ['fluvial', 'cours']
+            ],
+            'corps_humain' => [
+                'sang' => ['circulation', 'artere', 'veine'],
+                'coeur' => ['cardiaque', 'circulation'],
+                'cerveau' => ['neuronal', 'synapse', 'neurone']
+            ],
+            'couleurs' => [
+                // Les couleurs sont directement liées entre elles
+                'rouge' => ['ecarlate', 'vermillon'],
+                'bleu' => ['azur', 'cyan'],
+                'vert' => ['emeraude', 'olive']
+            ]
+        ];
+
+        if (!isset($strictRelations[$group])) {
+            return false;
+        }
+
+        $groupRelations = $strictRelations[$group];
+
+        // Vérifier si word1 est lié à word2 dans ce groupe
+        if (isset($groupRelations[$word1]) && in_array($word2, $groupRelations[$word1])) {
+            return true;
+        }
+
+        // Vérifier l'inverse
+        if (isset($groupRelations[$word2]) && in_array($word1, $groupRelations[$word2])) {
+            return true;
+        }
+
+        return false;
     }
 
     private function getSemanticGroups(): array
     {
+        // Groupes sémantiques BEAUCOUP plus petits et plus précis
         return [
             'etats_matiere' => ['liquide', 'gaz', 'solide', 'plasma', 'vapeur', 'fluide'],
-            'chimie' => ['molecule', 'atome', 'element', 'compose', 'reaction', 'chimique', 'formule', 'oxygene', 'hydrogene', 'carbone', 'azote'],
-            'eau_related' => ['eau', 'aquatique', 'marin', 'maritime', 'oceanique', 'fluvial', 'hydrique', 'hydraulique', 'hydrologie'],
-            'temperature' => ['chaud', 'froid', 'chaleur', 'temperature', 'thermique', 'calorique', 'glacial', 'bouillant'],
-            'corps_humain' => ['corps', 'organisme', 'cellule', 'tissu', 'organe', 'muscle', 'sang', 'cerveau', 'coeur'],
-            'science' => ['physique', 'biologie', 'chimie', 'mathematiques', 'recherche', 'experience', 'laboratoire', 'scientifique'],
-            'geographie' => ['terre', 'planete', 'continent', 'ocean', 'mer', 'riviere', 'montagne', 'vallee', 'climat'],
-            'vie' => ['vivant', 'organisme', 'biologique', 'vital', 'existence', 'survie', 'evolutif'],
-            'couleurs' => ['rouge', 'bleu', 'vert', 'jaune', 'noir', 'blanc', 'orange', 'violet', 'rose', 'gris'],
-            'taille' => ['grand', 'petit', 'enorme', 'minuscule', 'gigantesque', 'microscopique', 'immense', 'tiny'],
-            'mouvement' => ['rapide', 'lent', 'vitesse', 'acceleration', 'deceleration', 'mobile', 'statique', 'dynamique'],
-            'qualites' => ['important', 'essentiel', 'crucial', 'vital', 'necessaire', 'indispensable', 'fondamental'],
+            'chimie_eau' => ['eau', 'h2o', 'hydrogene', 'oxygene', 'molecule'],
+            'chimie_generale' => ['atome', 'element', 'compose', 'reaction', 'chimique', 'formule'],
+            'temperature' => ['chaud', 'froid', 'chaleur', 'temperature', 'thermique'],
+            'corps_humain' => ['corps', 'organisme', 'cellule', 'tissu', 'organe', 'sang', 'coeur'],
+            'couleurs_primaires' => ['rouge', 'bleu', 'vert', 'jaune'],
+            'couleurs_secondaires' => ['orange', 'violet', 'rose'],
+            'couleurs_neutres' => ['noir', 'blanc', 'gris'],
+            'taille_grande' => ['grand', 'enorme', 'gigantesque', 'immense'],
+            'taille_petite' => ['petit', 'minuscule', 'microscopique', 'tiny']
         ];
     }
 
     private function getRelatedSemanticGroups(): array
     {
-        return [
-            'etats_matiere' => ['chimie', 'temperature', 'science'],
-            'chimie' => ['etats_matiere', 'science', 'eau_related'],
-            'eau_related' => ['chimie', 'etats_matiere', 'geographie', 'vie'],
-            'temperature' => ['etats_matiere', 'science'],
-            'corps_humain' => ['vie', 'science'],
-            'science' => ['chimie', 'corps_humain', 'temperature'],
-            'geographie' => ['eau_related', 'vie'],
-            'vie' => ['corps_humain', 'eau_related', 'geographie'],
-        ];
-    }
-
-    private function getSynonyms(): array
-    {
-        return [
-            'eau' => ['h2o', 'aqua', 'flotte'],
-            'liquide' => ['fluide', 'liquid'],
-            'gaz' => ['gazeux', 'vapeur', 'aeriforme'],
-            'solide' => ['dur', 'rigide', 'cristallin'],
-            'chaud' => ['chaude', 'brulant', 'torride'],
-            'froid' => ['froide', 'glacial', 'frigide'],
-            'grand' => ['grande', 'gros', 'grosse', 'immense', 'gigantesque'],
-            'petit' => ['petite', 'minuscule', 'infime'],
-            'important' => ['importante', 'essentiel', 'essentielle', 'crucial', 'cruciale'],
-            'necessaire' => ['indispensable', 'requis', 'obligatoire'],
-            'vivant' => ['vivante', 'anime', 'biologique'],
-            'chimique' => ['chimiques', 'moleculaire'],
-            'naturel' => ['naturelle', 'nature', 'natif'],
-            'artificiel' => ['artificielle', 'synthetique', 'fabrique'],
-        ];
-    }
-
-    private function calculateLevenshteinSimilarity(string $str1, string $str2): float
-    {
-        $len1 = strlen($str1);
-        $len2 = strlen($str2);
-
-        if ($len1 === 0 && $len2 === 0) return 1.0;
-        if ($len1 === 0 || $len2 === 0) return 0.0;
-
-        $distance = levenshtein($str1, $str2);
-        $maxLen = max($len1, $len2);
-
-        return 1 - ($distance / $maxLen);
-    }
-
-    private function getStopWords(): array
-    {
-        return [
-            'le', 'de', 'et', 'à', 'un', 'il', 'être', 'en', 'avoir', 'que', 'pour',
-            'dans', 'ce', 'son', 'une', 'sur', 'avec', 'ne', 'se', 'pas', 'tout', 'plus',
-            'par', 'grand', 'mais', 'qui', 'comme', 'où', 'ou', 'du', 'des', 'les', 'la',
-            'cette', 'ces', 'ses', 'leur', 'leurs', 'aux', 'nous', 'vous', 'ils', 'elles',
-            'est', 'sont', 'était', 'ont', 'peut', 'fait', 'très', 'bien', 'deux', 'aussi'
-        ];
-    }
-
-    private function buildWordProximityMapping(string $content, array $proximityData): array
-    {
-        $mapping = [];
-
-        if (empty($proximityData)) {
-            return $mapping;
-        }
-
-        // Extraire tous les mots de l'article
-        $allContentWords = $this->extractAllWordsFromContent($content);
-
-        foreach ($proximityData as $proximityInfo) {
-            $guessedWord = $proximityInfo['word'];
-            $proximityScore = $proximityInfo['proximity'];
-
-            // Ignorer les proximités trop faibles
-            if ($proximityScore < 100) {
-                continue;
-            }
-
-            // Pour chaque mot de l'article, vérifier la compatibilité avec le mot deviné
-            foreach ($allContentWords as $contentWord) {
-                $normalizedContentWord = $this->normalizeWord($contentWord);
-                $normalizedGuessedWord = $this->normalizeWord($guessedWord);
-
-                $shouldMap = false;
-                $similarity = 0;
-
-                // 1. Vérifier si les deux sont des nombres
-                if ($this->isNumber($guessedWord) && $this->isNumber($contentWord)) {
-                    $numberProximity = $this->calculateNumberProximity($guessedWord, $contentWord);
-                    if ($numberProximity > 0) {
-                        $shouldMap = true;
-                        $similarity = $numberProximity / 1000; // Normaliser pour comparaison
-                    }
-                }
-                // 2. Vérifier si les deux sont des dates
-                elseif ($this->isDate($guessedWord) && $this->isDate($contentWord)) {
-                    $dateProximity = $this->calculateDateProximity($guessedWord, $contentWord);
-                    if ($dateProximity > 0) {
-                        $shouldMap = true;
-                        $similarity = $dateProximity / 1000; // Normaliser pour comparaison
-                    }
-                }
-                // 3. Vérifier la similarité textuelle pour les mots normaux
-                else {
-                    $textSimilarity = $this->calculateLevenshteinSimilarity($normalizedGuessedWord, $normalizedContentWord);
-                    // Réduire le seuil de similarité pour garder plus de suggestions
-                    if ($textSimilarity > 0.2) {
-                        $shouldMap = true;
-                        $similarity = $textSimilarity;
-                    }
-
-                    // Vérifier aussi la proximité sémantique
-                    $semanticScore = $this->calculateSemanticSimilarity($normalizedGuessedWord, $normalizedContentWord);
-                    if ($semanticScore > 600) {
-                        $shouldMap = true;
-                        $similarity = max($similarity, $semanticScore / 1000);
-                    }
-
-                    // Vérifier les sous-chaînes pour maintenir les suggestions
-                    if (strlen($normalizedGuessedWord) >= 3 && strlen($normalizedContentWord) >= 3) {
-                        if (strpos($normalizedGuessedWord, $normalizedContentWord) !== false ||
-                            strpos($normalizedContentWord, $normalizedGuessedWord) !== false) {
-                            $shouldMap = true;
-                            $similarity = max($similarity, 0.6);
-                        }
-                    }
-                }
-
-                // Si ce mot doit être mappé
-                if ($shouldMap) {
-                    $currentScore = $proximityScore * $similarity; // Score combiné
-
-                    // CHANGEMENT IMPORTANT: Au lieu de remplacer, garder la meilleure suggestion
-                    // mais aussi permettre plusieurs suggestions pour le même mot si elles sont bonnes
-                    if (!isset($mapping[$normalizedContentWord])) {
-                        $mapping[$normalizedContentWord] = [
-                            'guessed_word' => $guessedWord,
-                            'proximity' => $proximityScore,
-                            'similarity' => $similarity,
-                            'combined_score' => $currentScore
-                        ];
-                    } else {
-                        // Si le nouveau mapping a un score significativement meilleur (>20% d'amélioration)
-                        // OU si c'est une proximité très élevée (>800), alors on remplace
-                        $existingScore = $mapping[$normalizedContentWord]['combined_score'];
-                        if ($currentScore > $existingScore * 1.2 || $proximityScore > 800) {
-                            $mapping[$normalizedContentWord] = [
-                                'guessed_word' => $guessedWord,
-                                'proximity' => $proximityScore,
-                                'similarity' => $similarity,
-                                'combined_score' => $currentScore
-                            ];
-                        }
-                        // Sinon, on garde l'ancien mapping pour éviter que les suggestions disparaissent
-                    }
-                }
-            }
-        }
-
-        return $mapping;
-    }
-
-    /**
-     * Construit un mapping des proximités sémantiques pour les mots trouvés
-     */
-    private function buildSemanticProximityMapping(string $content, array $foundWords): array
-    {
-        $mapping = [];
-
-        if (empty($foundWords)) {
-            return $mapping;
-        }
-
-        // Extraire tous les mots de l'article
-        $allContentWords = $this->extractAllWordsFromContent($content);
-
-        foreach ($foundWords as $foundWord) {
-            $normalizedFoundWord = $this->normalizeWord($foundWord);
-
-            // Pour chaque mot de l'article, vérifier s'il a une proximité sémantique avec ce mot trouvé
-            foreach ($allContentWords as $contentWord) {
-                $normalizedContentWord = $this->normalizeWord($contentWord);
-
-                // Éviter de remapper le mot sur lui-même s'il est déjà à sa place exacte
-                if ($normalizedContentWord === $normalizedFoundWord) {
-                    continue;
-                }
-
-                // Calculer la proximité sémantique
-                $semanticScore = $this->calculateSemanticSimilarity($normalizedFoundWord, $normalizedContentWord);
-
-                // Si il y a une proximité sémantique significative
-                if ($semanticScore >= 700) // Seuil élevé pour l'affichage sémantique
-                {
-                    // Seulement si ce mot n'a pas déjà un mapping avec un score plus élevé
-                    if (!isset($mapping[$normalizedContentWord]) || $mapping[$normalizedContentWord]['proximity'] < $semanticScore) {
-                        $mapping[$normalizedContentWord] = [
-                            'found_word' => $foundWord,
-                            'proximity' => $semanticScore
-                        ];
-                    }
-                }
-            }
-        }
-
-        return $mapping;
+        // SUPPRIMÉ - plus de groupes liés pour éviter les fausses associations
+        return [];
     }
 
     /**
@@ -1683,5 +1264,141 @@ class PedantixService
 
         // Flush tous les changements en une fois
         $this->entityManager->flush();
+    }
+
+    /**
+     * Calcule la proximité sémantique entre un mot deviné et le contenu de l'article
+     * Version BEAUCOUP plus stricte pour éviter les fausses associations
+     */
+    private function calculateSemanticProximity(string $guess, string $content, string $title): int
+    {
+        $normalizedGuess = $this->normalizeWord($guess);
+
+        // Extraire les mots du contenu et du titre
+        $contentWords = $this->extractAllWords($content);
+        $titleWords = array_map([$this, 'normalizeWord'], $this->extractTitleWords($title));
+
+        $maxProximity = 0;
+
+        // Vérifier la proximité avec chaque mot du contenu et du titre
+        foreach (array_merge($contentWords, $titleWords) as $contentWord) {
+            $normalizedContentWord = $this->normalizeWord($contentWord);
+
+            // Éviter de comparer un mot avec lui-même
+            if ($normalizedGuess === $normalizedContentWord) {
+                continue;
+            }
+
+            $similarity = $this->calculateSemanticSimilarity($normalizedGuess, $normalizedContentWord);
+            $maxProximity = max($maxProximity, $similarity);
+        }
+
+        return $maxProximity;
+    }
+
+    /**
+     * Construit un mapping des proximités pour les mots devinés
+     */
+    private function buildWordProximityMapping(string $content, array $proximityData): array
+    {
+        $mapping = [];
+        $contentWords = $this->extractAllWordsFromContent($content);
+
+        foreach ($proximityData as $proximityItem) {
+            $guessedWord = $proximityItem['word'] ?? '';
+            $proximityScore = $proximityItem['proximity'] ?? 0;
+
+            if (empty($guessedWord) || $proximityScore <= 0) {
+                continue;
+            }
+
+            $normalizedGuess = $this->normalizeWord($guessedWord);
+
+            // Chercher les mots du contenu qui pourraient correspondre
+            foreach ($contentWords as $contentWord) {
+                $normalizedContentWord = $this->normalizeWord($contentWord);
+
+                // Vérifier si ce mot du contenu a une proximité sémantique avec le mot deviné
+                $similarity = $this->calculateSemanticSimilarity($normalizedGuess, $normalizedContentWord);
+
+                if ($similarity > 0 && $similarity >= $proximityScore * 0.8) { // Tolérance de 20%
+                    $mapping[$normalizedContentWord] = [
+                        'guessed_word' => $guessedWord,
+                        'proximity' => $proximityScore
+                    ];
+                }
+            }
+        }
+
+        return $mapping;
+    }
+
+    /**
+     * Construit un mapping des proximités sémantiques pour les mots trouvés
+     */
+    private function buildSemanticProximityMapping(string $content, array $foundWords): array
+    {
+        $mapping = [];
+        $contentWords = $this->extractAllWordsFromContent($content);
+
+        foreach ($foundWords as $foundWord) {
+            $normalizedFoundWord = $this->normalizeWord($foundWord);
+
+            foreach ($contentWords as $contentWord) {
+                $normalizedContentWord = $this->normalizeWord($contentWord);
+
+                // Éviter de mapper un mot trouvé avec lui-même
+                if ($normalizedFoundWord === $normalizedContentWord) {
+                    continue;
+                }
+
+                $similarity = $this->calculateSemanticSimilarity($normalizedFoundWord, $normalizedContentWord);
+
+                if ($similarity > 0) {
+                    $mapping[$normalizedContentWord] = [
+                        'found_word' => $foundWord,
+                        'proximity' => $similarity
+                    ];
+                }
+            }
+        }
+
+        return $mapping;
+    }
+
+    /**
+     * Dictionnaire de synonymes très restreint
+     */
+    private function getSynonyms(): array
+    {
+        return [
+            // Synonymes directs uniquement - très restrictif
+            'eau' => ['h2o'],
+            'h2o' => ['eau'],
+            'ocean' => ['mer'],
+            'mer' => ['ocean'],
+            'rouge' => ['ecarlate'],
+            'ecarlate' => ['rouge'],
+            'bleu' => ['azur'],
+            'azur' => ['bleu'],
+            'grand' => ['gros'],
+            'gros' => ['grand'],
+            'petit' => ['minuscule'],
+            'minuscule' => ['petit']
+        ];
+    }
+
+    /**
+     * Mots vides à ignorer dans l'analyse
+     */
+    private function getStopWords(): array
+    {
+        return [
+            'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de', 'et', 'est', 'en', 'a', 'il', 'être', 'et', 'à', 'avoir', 'que', 'pour',
+            'dans', 'ce', 'son', 'une', 'sur', 'avec', 'ne', 'se', 'pas', 'tout', 'plus', 'par', 'grand', 'ou', 'si', 'les',
+            'deux', 'très', 'bien', 'où', 'sans', 'peut', 'lui', 'aussi', 'son', 'comme', 'après', 'alors', 'sous', 'était',
+            'avant', 'entre', 'fait', 'lors', 'dont', 'cet', 'donc', 'cette', 'ses', 'soit', 'leur', 'ont', 'peu', 'aux',
+            'nous', 'vous', 'ils', 'elles', 'ces', 'ceux', 'celle', 'celui', 'depuis', 'contre', 'vers', 'chez', 'selon'
+        ];
     }
 }

@@ -1117,5 +1117,45 @@ async function loadGameData() {
     await loadArticleContent();
     await updateLeaderboard();
 }
+
+// Fonction pour stocker les proximités localement (fonction manquante)
+function storeProximityLocally(word, proximity) {
+    try {
+        const key = `proximities_${roomCode}`;
+        let storedProximities = JSON.parse(localStorage.getItem(key) || '[]');
+
+        // Éviter les doublons et limiter à 20 mots maximum
+        storedProximities = storedProximities.filter(p => p.word !== word);
+        storedProximities.push({
+            word: word,
+            proximity: proximity,
+            timestamp: Date.now()
+        });
+
+        // Garder seulement les 20 plus récents
+        storedProximities = storedProximities
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 20);
+
+        localStorage.setItem(key, JSON.stringify(storedProximities));
+    } catch (error) {
+        console.warn('Erreur lors du stockage de la proximité:', error);
+    }
+}
+
+// Fonction pour nettoyer les proximités anciennes
+function cleanOldProximities() {
+    try {
+        const key = `proximities_${roomCode}`;
+        let storedProximities = JSON.parse(localStorage.getItem(key) || '[]');
+        const oneHourAgo = Date.now() - (60 * 60 * 1000);
+
+        // Supprimer les proximités de plus d'une heure
+        storedProximities = storedProximities.filter(p => p.timestamp > oneHourAgo);
+        localStorage.setItem(key, JSON.stringify(storedProximities));
+    } catch (error) {
+        console.warn('Erreur lors du nettoyage des proximités:', error);
+    }
+}
 </script>
 {% endblock %}
