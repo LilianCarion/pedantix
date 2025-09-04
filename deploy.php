@@ -252,44 +252,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
 
         // Continuer même si la base existe déjà
 
-        // Étape 6: Gestion intelligente des migrations
-        $steps[] = ['step' => 6, 'description' => 'Gestion intelligente des migrations et schéma de base'];
+        // Étape 6: Gestion intelligente des migrations avec correction des colonnes manquantes
+        $steps[] = ['step' => 6, 'description' => 'Migrations et vérification du schéma de base'];
 
-        // Vérifier l'état des migrations
-        $result = execWithEnv("$phpPath bin/console doctrine:migrations:status", $phpPath);
-        $migrationStatus = $result['output'];
+        // Vérifier si les tables existent et s'il manque des colonnes
+        $result = execWithEnv("$phpPath bin/console doctrine:schema:update --dump-sql", $phpPath);
+        $schemaDiff = $result['output'];
 
-        // Si des tables existent déjà mais que les migrations sont désynchronisées
-        if (strpos($migrationStatus, 'previously executed migrations') !== false ||
-            strpos($migrationStatus, 'not registered migrations') !== false) {
+        if (strpos($schemaDiff, 'ALTER TABLE') !== false || strpos($schemaDiff, 'CREATE TABLE') !== false) {
+            // Il y a des changements de schéma à appliquer
+            $result = execWithEnv("$phpPath bin/console doctrine:schema:update --force", $phpPath);
+            $steps[5]['success'] = $result['success'];
+            $steps[5]['output'] = "Mise à jour du schéma automatique:\n" . $result['output'];
 
-            // Marquer toutes les migrations comme exécutées pour synchroniser l'état
-            $result = execWithEnv("$phpPath bin/console doctrine:migrations:version --add --all --no-interaction", $phpPath);
-            $steps[5]['success'] = true;
-            $steps[5]['output'] = "Migrations existantes synchronisées:\n" . $result['output'];
-
+            if (!$result['success']) {
+                throw new Exception('Échec de la mise à jour du schéma: ' . $result['output']);
+            }
         } else {
-            // Exécution normale des migrations
+            // Essayer les migrations normales
             $result = execWithEnv("$phpPath bin/console doctrine:migrations:migrate --no-interaction", $phpPath);
             $steps[5]['success'] = $result['success'];
             $steps[5]['output'] = $result['output'];
 
             if (!$result['success']) {
-                // Si les migrations échouent à cause de tables existantes, les marquer comme exécutées
-                if (strpos($result['output'], 'already exists') !== false) {
+                // Si les migrations échouent, marquer toutes comme exécutées et forcer la mise à jour du schéma
+                if (strpos($result['output'], 'already exists') !== false || strpos($result['output'], 'previously executed') !== false) {
                     $result2 = execWithEnv("$phpPath bin/console doctrine:migrations:version --add --all --no-interaction", $phpPath);
-                    $steps[5]['success'] = true;
-                    $steps[5]['output'] .= "\n\nTables existantes détectées - synchronisation automatique:\n" . $result2['output'];
+                    $result3 = execWithEnv("$phpPath bin/console doctrine:schema:update --force", $phpPath);
+                    $steps[5]['success'] = $result3['success'];
+                    $steps[5]['output'] .= "\n\nSynchronisation et mise à jour forcée du schéma:\n" . $result2['output'] . "\n" . $result3['output'];
                 } else {
                     throw new Exception('Échec des migrations: ' . $result['output']);
                 }
             }
         }
 
-        // Vérification du schéma après migration
+        // Vérification finale du schéma
         $result = execWithEnv("$phpPath bin/console doctrine:schema:validate --no-interaction", $phpPath);
         if ($result['success']) {
-            $steps[5]['output'] .= "\n✅ Schéma de base de données validé";
+            $steps[5]['output'] .= "\n✅ Schéma de base de données validé et synchronisé";
         }
 
         // Étape 7: Nettoyer le cache
