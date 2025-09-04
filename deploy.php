@@ -134,11 +134,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['auto'])) {
         $envContent .= "DATABASE_URL=\"mysql://{$ovh_config['db_user']}:{$ovh_config['db_pass']}@{$ovh_config['db_host']}:3306/{$ovh_config['db_name']}?serverVersion=8.0&charset=utf8mb4\"\n\n";
         $envContent .= "# Configuration serveur\n";
         $envContent .= "TRUSTED_PROXIES=127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16\n";
-        $envContent .= "TRUSTED_HOSTS='^(localhost|127\\.0\\.0\\.1|" . preg_quote($ovh_config['domain'], '/') . ")$'\n";
+        $envContent .= "TRUSTED_HOSTS='^(localhost|127\\.0\\.0\\.1|" . preg_quote($ovh_config['domain'], '/') . ")$'\n\n";
+        $envContent .= "# Optimisations production\n";
+        $envContent .= "OPCACHE_PRELOAD=var/cache/prod/App_KernelProdContainer.preload.php\n";
 
         if (file_put_contents('.env', $envContent) === false) {
             throw new Exception('Impossible de créer le fichier .env');
         }
+
+        // Forcer aussi la création d'un .env.local pour s'assurer que l'environnement est bien prod
+        $envLocalContent = "APP_ENV=prod\nAPP_DEBUG=0\n";
+        file_put_contents('.env.local', $envLocalContent);
+
         $steps[1]['success'] = true;
 
         // Étape 3: Installer Composer avec le bon chemin PHP
